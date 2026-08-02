@@ -22,7 +22,8 @@
         "aluminum 7075/2024",
         "carbon fiber composites"
       ],
-      "finishing_labor_note": "Fatigue- and aero-critical surfaces need tight, traceable tolerances under AS9100/FAA oversight, so deburring, blending, and polishing stay manual instead of fixed-tooled."
+      "finishing_labor_note": "Fatigue- and aero-critical surfaces need tight, traceable tolerances under AS9100/FAA oversight, so deburring, blending, and polishing stay manual instead of fixed-tooled.",
+      "finishing_labor_ratio": 0.20
     },
     "aerospace_mro": {
       "name": "Aerospace MRO",
@@ -39,7 +40,8 @@
         "composite skins",
         "corrosion-resistant primers and topcoats"
       ],
-      "finishing_labor_note": "Airframe stripping, blasting, and repaint during scheduled maintenance is a major, recurring application done largely by hand under OEM paint specs; this segment is easy to miss because it's a services NAICS code, not a manufacturing one."
+      "finishing_labor_note": "Airframe stripping, blasting, and repaint during scheduled maintenance is a major, recurring application done largely by hand under OEM paint specs; this segment is easy to miss because it's a services NAICS code, not a manufacturing one.",
+      "finishing_labor_ratio": 0.25
     },
     "maritime": {
       "name": "Maritime",
@@ -58,7 +60,8 @@
         "stainless steel",
         "bronze"
       ],
-      "finishing_labor_note": "Corrosion protection in a saltwater environment demands heavy grinding, blasting, and coating prep over large, awkward hull surfaces that don't fit fixed cells."
+      "finishing_labor_note": "Corrosion protection in a saltwater environment demands heavy grinding, blasting, and coating prep over large, awkward hull surfaces that don't fit fixed cells.",
+      "finishing_labor_ratio": 0.20
     },
     "specialty_and_heavy_vehicles": {
       "name": "Specialty and heavy vehicles",
@@ -81,7 +84,8 @@
         "aluminum sheet",
         "fiberglass and composite panels"
       ],
-      "finishing_labor_note": "High-mix, low-to-mid volume production with cosmetic Class-A or mil-spec coating requirements keeps sanding and grinding manual rather than fixed-automated."
+      "finishing_labor_note": "High-mix, low-to-mid volume production with cosmetic Class-A or mil-spec coating requirements keeps sanding and grinding manual rather than fixed-automated.",
+      "finishing_labor_ratio": 0.15
     },
     "heavy_equipment_and_machinery": {
       "name": "Heavy equipment and machinery",
@@ -101,7 +105,8 @@
         "cast iron",
         "wear-resistant alloys"
       ],
-      "finishing_labor_note": "Parts exceed the reach and payload of typical fixed robotic cells, so weld grinding and deburring remain manual."
+      "finishing_labor_note": "Parts exceed the reach and payload of typical fixed robotic cells, so weld grinding and deburring remain manual.",
+      "finishing_labor_ratio": 0.15
     },
     "plastics_and_composites": {
       "name": "Plastics and composites",
@@ -120,7 +125,8 @@
         "fiberglass-reinforced composites",
         "extruded thermoplastics"
       ],
-      "finishing_labor_note": "Large thermoformers and composite shops run heavy trim and sand labor removing flash, parting lines, and mold marks from low-volume, high-mix sheet and layup work — the qualification gate filters for scale here, not the NAICS list itself."
+      "finishing_labor_note": "Large thermoformers and composite shops run heavy trim and sand labor removing flash, parting lines, and mold marks from low-volume, high-mix sheet and layup work — the qualification gate filters for scale here, not the NAICS list itself.",
+      "finishing_labor_ratio": 0.20
     },
     "metal_fabrication": {
       "name": "Metal fabrication",
@@ -139,7 +145,8 @@
         "stainless steel",
         "aluminum"
       ],
-      "finishing_labor_note": "Extreme part variety and small lot sizes make fixed tooling uneconomical, so weld grinding and deburring stay manual job-shop work."
+      "finishing_labor_note": "Extreme part variety and small lot sizes make fixed tooling uneconomical, so weld grinding and deburring stay manual job-shop work.",
+      "finishing_labor_ratio": 0.15
     }
   },
   "anchor_accounts": [

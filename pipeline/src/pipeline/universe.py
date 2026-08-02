@@ -13,6 +13,11 @@ class Vertical:
     part_geometry_classes: list[str]
     materials: list[str]
     finishing_labor_note: str
+    # Fraction of a facility's total employees estimated to do finishing work
+    # (sanding/grinding/blasting/polishing/buffing/inspection/spraying).
+    # Illustrative default per vertical, not derived from customer data --
+    # see CLAUDE.md's scoring section. A knob to calibrate, not a fact.
+    finishing_labor_ratio: float
 
     @property
     def codes(self) -> list[str]:
@@ -55,6 +60,7 @@ def load_universe(path: Path = CONFIG_PATH) -> Universe:
             part_geometry_classes=entry["part_geometry_classes"],
             materials=entry["materials"],
             finishing_labor_note=entry["finishing_labor_note"],
+            finishing_labor_ratio=entry["finishing_labor_ratio"],
         )
         for key, entry in raw["verticals"].items()
     }

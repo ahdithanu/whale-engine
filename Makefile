@@ -22,7 +22,7 @@ merge:
 	cd pipeline && uv run python -m pipeline.ingest.merge
 
 resolve:
-	cd pipeline && uv run python -m pipeline.resolve
+	cd pipeline && uv run python -m pipeline.resolve.universe
 
 score:
 	cd pipeline && uv run python -m pipeline.score

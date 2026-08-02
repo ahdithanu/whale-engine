@@ -1,0 +1,62 @@
+# Scoring weights and assumptions for pipeline.score. Live here, not hardcoded,
+# because arguing with these in front of the customer is a feature -- edit
+# this file and rerun `make score`, no code change required.
+
+# Must sum to 1.0 -- score.py asserts this rather than silently renormalizing.
+weights:
+  voc_tonnage_percentile: 0.30   # strongest proxy for coating/finishing scale
+  dart_rate_and_trend: 0.25      # ergonomic injury cost is the wedge
+  dod_awards_log_scaled: 0.20    # backlog and reshoring signal
+  employee_count_band: 0.15      # plant size
+  air_permit_class: 0.10         # Title V vs minor source
+
+# The DART component (weight above) splits into rate-level and trend-direction
+# sub-components. A facility with a high DART rate that's actively getting
+# worse is a stronger wedge than one that's high but already improving on its
+# own -- "up" scores highest, not "down".
+dart:
+  rate_sub_weight: 0.7
+  trend_sub_weight: 0.3
+  trend_scores:  # 0-100 scale, blended into the trend sub-component
+    up: 100
+    flat: 50
+    down: 0
+    no_data: 50   # neutral, not penalized -- we simply don't know
+
+# employee_count -> 0-100 score. First band whose max the count is <= wins;
+# null max = no upper bound (500+).
+employee_bands:
+  - {max: 9, score: 10}
+  - {max: 19, score: 25}
+  - {max: 49, score: 45}
+  - {max: 149, score: 65}
+  - {max: 499, score: 85}
+  - {max: null, score: 100}
+
+assumptions:
+  # $/robotic cell, used for est_facility_TCV and est_account_TCV_ceiling.
+  # This is an industry-ballpark placeholder, not a customer-provided number
+  # -- treat every dollar figure downstream of this as provisional until
+  # Agent 4 (Capital Case Builder, currently mocked) provides a real one.
+  per_cell_tcv_usd: 600000
+  # Rough finishing-labor throughput per cell: how many finishing-labor
+  # employees' worth of manual work one robotic cell is assumed to absorb.
+  # Also a placeholder -- calibrate against a real installed base once one
+  # exists (installed_status is "untouched" for every facility today).
+  employees_per_cell: 4
+  # Fallback finishing_labor_ratio for facilities with no determinable
+  # vertical (federal depot facilities bypassed NAICS matching -- see
+  # CLAUDE.md's federal-coverage caveat). Lower than any real vertical's
+  # ratio in naics_universe.json, deliberately conservative since we
+  # genuinely don't know their finishing-labor mix.
+  default_finishing_labor_ratio: 0.10
+  # OSHA annual_average_employees sanity ceiling for a SINGLE establishment.
+  # Real known mega-sites in the data top out around 33,000 (Boeing
+  # Everett — the largest manufacturing building in the world by volume).
+  # Anchored 25% above that observed legitimate max, not an arbitrary round
+  # number. A value above this (found once so far: a small-town company
+  # reporting 77,571 employees at one site — clearly a filing error, not a
+  # real mega-employer) is excluded from headcount/TCV math and flagged
+  # employee_count_suspect=true rather than either trusted or silently
+  # dropped. Raise this if a real facility legitimately exceeds it later.
+  employee_count_sanity_cap: 41250

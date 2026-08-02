@@ -325,6 +325,50 @@ the UI, because arguing with the weights in front of a customer is a feature.
 The "why now" string is templated and deterministic, not LLM generated. Only
 include clauses where underlying data exists.
 
+**Status: built and run** (`pipeline.score`, config in
+`pipeline/src/pipeline/scoring_config.yaml`). VOC and DART percentiles rank
+within the facility's vertical (derived from its EPA member's matched NAICS
+codes — federal depot facilities have none, one more compounding reason they
+score low, on top of the OSHA/EPA reporting-granularity gap above). DoD
+dollars rank globally. Missing data always contributes 0 to its weighted
+component; percentile/rank never gets renormalized to what's available,
+since that would quietly reward facilities for having *less* data.
+
+Two real bugs caught by checking actual output, not from reading the code:
+
+1. **Scale bug** — components were computed as `percentile * weight / 100`,
+   an accidental extra divide-by-100 that put every facility_score on a
+   0–1 scale instead of 0–100 (top facility was scoring 0.86, not 86).
+   Fixed by removing the stray `/100` — `score * weight` where score is
+   already 0–100 and weights sum to 1.0 lands directly on 0–100.
+2. **OSHA employee-count outlier** — a small-town company's OSHA filing
+   claimed 77,571 employees at one site, which would rank it the largest
+   single manufacturing employer in America. Real legitimate outliers exist
+   in the data (Boeing Everett: ~33,000, a real mega-site, not an error), so
+   a naive cap would have thrown out a correct data point along with the bad
+   one. `scoring_config.yaml`'s `employee_count_sanity_cap` (41,250) is
+   anchored 25% above the largest *legitimate* value actually observed in
+   the data, not an arbitrary round number. A value above it is excluded
+   from headcount/TCV math and flagged `employee_count_suspect=true` —
+   never silently trusted, never silently dropped. Before this fix the
+   anomaly alone put a company nobody would recognize at #2 nationally by
+   TCV ceiling, ahead of Lockheed Martin.
+
+**A real, well-understood limitation surfaced by this run:** qualification
+and TCV contribution are gated by different signals — a facility qualifies
+via VOC tonnage OR an AIR MAJOR permit OR OSHA employee count, but
+`est_facility_TCV` specifically requires `employee_count` (no employee data,
+no headcount estimate, $0 TCV even though the facility is real and
+qualified). Caterpillar illustrates this cleanly: 10 of its 51 resolved
+facilities qualify, but 9 of those 10 have no OSHA match, so the entire
+$10.2M account TCV ceiling comes from one facility (Solar Turbines
+Turbofab, Channelview TX) — despite East Peoria, Decatur, Mossville, and
+Joliet all being real, qualified, Title-V-permitted Caterpillar plants.
+Ranks Caterpillar #383 by TCV ceiling nationally, well below what its real
+footprint would suggest. Not a bug — an honest reflection of where OSHA
+data coverage is thin — but worth knowing before reading any TCV ranking
+as complete.
+
 ### Facility qualification gate (pre-scoring)
 
 Not every resolved facility should count toward `est_account_TCV_ceiling`.
@@ -430,13 +474,45 @@ for exactly this reason (6 of 14 seeded customers matched instead of 10).
 Of the 14 accounts seeded `account_is_customer` in `corporate_map.yaml`, 10
 matched at least one real source record as of this run: Boeing (101
 facilities, 39 qualified), Caterpillar (51, 10), Oshkosh Corporation (42,
-14), U.S. Air Force (25, 2 — the Air Logistics Complexes fragment into many
-small EPA sub-registrations, most without their own VOC/Title V data, same
-pattern as Boeing/Caterpillar), Federal Signal, Vactor, Janicki, Miller
-Industries, Productive Plastics, Lawrence Brothers. Four (Raytheon
-Technologies, Planet 9, Magee, Innovative Surface Works) have no matching
-record under their exact name in any of our three sources — reported as a
-gap, not silently dropped.
+14), U.S. Air Force (25, 2 — see the federal-coverage caveat immediately
+below, this number is almost certainly low), Federal Signal, Vactor,
+Janicki, Miller Industries, Productive Plastics, Lawrence Brothers. Four
+(Raytheon Technologies, Planet 9, Magee, Innovative Surface Works) had no
+matching record under their exact name as of the first run — Raytheon/RTX
+aliases (RTX, Raytheon Company, Raytheon Missiles & Defense, Raytheon
+Intelligence & Space, Collins Aerospace, Rockwell Collins, Goodrich, Pratt &
+Whitney — all in `corporate_map.yaml`) were added 2026-08-01 specifically
+because zero matches on a marquee logo like RTX reads as a resolver bug even
+when it's a missing-alias gap; Planet 9, Magee, and Innovative Surface Works
+still have no matching record under their exact name in any of our three
+sources.
+
+### Federal facility coverage is likely undercounted — known gap, not debugged tonight
+
+USAF showing 2 qualified of 25 facilities is almost certainly low, and this
+generalizes to the other federal depots, not just USAF. Two structural
+reasons, neither of which is a resolver bug:
+
+1. **OSHA.** Federal agencies report injury/illness data to OSHA under a
+   different regime than private employers — they don't file the standard
+   Form 300A the ITA bulk CSV we ingest is built from. `osha_establishments`
+   is likely near-empty for military installations regardless of how well
+   entity resolution works, because the source data itself doesn't cover
+   them the same way.
+2. **EPA/NEI.** Large federal installations often report emissions at the
+   installation level (one EIS/NEI record for the whole base) rather than
+   per shop/building the way a commercial manufacturer's plant does. A depot
+   with a dozen real finishing shops may show one facility with VOC data and
+   eleven sub-registrations (a demolition project, a housing area, a solar
+   array) with none — which is exactly the pattern already visible in the
+   Hill/Tinker/Robins data.
+
+Both mean the qualification gate (nonzero VOC, AIR MAJOR permit, OSHA
+employee count) systematically underfires on federal sites even when the
+real underlying finishing operation is large. Worth a dedicated pass later
+(probably: treat the federal depot override's `category` as its own
+qualification path, independent of VOC/employee data, since we already know
+by name that these are major finishing operations) — not attempted now.
 
 ### Stage 1: facility resolution
 

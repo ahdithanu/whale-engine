@@ -133,6 +133,23 @@ aliases:
   "MCDONNELL DOUGLAS": BOEING
   "MCDONNELL DOUGLAS HELICOPTER": BOEING
   "INSITU": BOEING
+  # Raytheon Technologies / RTX -- added 2026-08-01 by explicit instruction,
+  # NOT yet confirmed against a resolver run the way the entries above were.
+  # Zero matches on the RTX/Raytheon family was a real hole: Collins
+  # Aerospace and Pratt & Whitney alone are large plant networks, and a
+  # marquee logo showing zero facilities looks like a resolver bug even when
+  # it's actually a missing-alias gap. Keys computed via
+  # normalize_company_name, not guessed by hand -- rerun and check actual
+  # match counts before trusting these blindly the way the file's other
+  # aliases are (see the block below theirs for the same discipline).
+  "RTX": RAYTHEON_TECHNOLOGIES
+  "RAYTHEON": RAYTHEON_TECHNOLOGIES
+  "RAYTHEON MISSILES AND DEFENSE": RAYTHEON_TECHNOLOGIES
+  "RAYTHEON INTELLIGENCE AND SPACE": RAYTHEON_TECHNOLOGIES
+  "COLLINS AEROSPACE": RAYTHEON_TECHNOLOGIES
+  "ROCKWELL COLLINS": RAYTHEON_TECHNOLOGIES
+  "GOODRICH": RAYTHEON_TECHNOLOGIES
+  "PRATT AND WHITNEY": RAYTHEON_TECHNOLOGIES
 
 # Candidates searched for but NOT found in any source (2026-08-01 run) --
 # deliberately excluded above rather than guessed:

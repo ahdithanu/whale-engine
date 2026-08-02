@@ -28,6 +28,12 @@ def test_every_vertical_has_ui_metadata():
         assert vertical.finishing_labor_note
 
 
+def test_every_vertical_has_a_plausible_finishing_labor_ratio():
+    universe = load_universe()
+    for vertical in universe.verticals.values():
+        assert 0 < vertical.finishing_labor_ratio <= 1, f"{vertical.name!r} finishing_labor_ratio out of range"
+
+
 def test_anchor_accounts_reference_known_verticals():
     universe = load_universe()
     assert {a.name for a in universe.anchor_accounts} == {"Boeing", "Oshkosh Corporation", "Caterpillar"}

@@ -39,8 +39,70 @@ from pipeline.config import DUCKDB_PATH
 from pipeline.resolve.anchors import OVERRIDES_PATH, qualifies_for_tcv, resolve_facilities
 from pipeline.resolve.geocode import geocode_batch
 from pipeline.resolve.normalize import normalize_address, normalize_company_name
+from pipeline.universe import load_universe
 
 MAX_BUCKET_SIZE_FOR_RESOLUTION = 500  # safety valve against a pathologically generic shared name
+
+TREND_UP_THRESHOLD = 0.05
+TREND_DOWN_THRESHOLD = -0.05
+
+
+def _naics_to_vertical_map() -> dict[str, str]:
+    universe = load_universe()
+    return {code: vkey for vkey, vertical in universe.verticals.items() for code in vertical.codes}
+
+
+def facility_vertical(records: list[dict], member_idxs: list[int], naics_to_vertical: dict[str, str]) -> str | None:
+    """First vertical matched by any EPA member's NAICS codes. Federal depot
+    facilities bypassed NAICS matching entirely and have none -- they get no
+    vertical, which means no VOC-percentile-within-vertical score component
+    either. That's a real, separate contributor to federal facilities
+    scoring low, on top of the OSHA/EPA reporting-granularity gap already
+    documented in CLAUDE.md -- not something to paper over here."""
+    for i in member_idxs:
+        r = records[i]
+        if r["source"] != "epa":
+            continue
+        for code in r["extra"].get("matched_naics_codes") or []:
+            if code in naics_to_vertical:
+                return naics_to_vertical[code]
+    return None
+
+
+def facility_dart(records: list[dict], member_idxs: list[int]) -> tuple[float | None, str, int | None]:
+    """Returns (most_recent_dart_rate, trend, most_recent_employee_count).
+    Trend uses the same +/-5% band as the NEI VOC trend for consistency."""
+    series = []
+    employee_count = None
+    for i in member_idxs:
+        r = records[i]
+        if r["source"] != "osha":
+            continue
+        series.extend(r["extra"].get("dart_series") or [])
+        if r["extra"].get("annual_average_employees") is not None:
+            employee_count = r["extra"]["annual_average_employees"]
+    if not series:
+        return None, "no_data", employee_count
+
+    series = [s for s in series if s.get("dart_rate") is not None]
+    if not series:
+        return None, "no_data", employee_count
+    series.sort(key=lambda s: s["year"])
+    most_recent = series[-1]["dart_rate"]
+
+    if len(series) < 2:
+        return most_recent, "no_data", employee_count
+    first, last = series[0]["dart_rate"], series[-1]["dart_rate"]
+    if first == 0:
+        return most_recent, "no_data", employee_count
+    pct_change = (last - first) / first
+    if pct_change >= TREND_UP_THRESHOLD:
+        trend = "up"
+    elif pct_change <= TREND_DOWN_THRESHOLD:
+        trend = "down"
+    else:
+        trend = "flat"
+    return most_recent, trend, employee_count
 
 
 def _load_overrides() -> dict:
@@ -76,13 +138,13 @@ def gather_all_epa(con: duckdb.DuckDBPyConnection) -> list[dict]:
         SELECT registry_id, facility_name, address, city, state, zip, latitude, longitude,
                voc_tons_2017, voc_tons_2020, voc_pct_change_2017_2020, voc_trend,
                pm10_tons_2020, pm25_tons_2020, has_air_major_permit,
-               federal_depot_account, federal_depot_category
+               federal_depot_account, federal_depot_category, matched_naics_codes
         FROM epa_facilities
     """).fetchall()
     cols = ["registry_id", "facility_name", "address", "city", "state", "zip", "latitude", "longitude",
             "voc_tons_2017", "voc_tons_2020", "voc_pct_change_2017_2020", "voc_trend",
             "pm10_tons_2020", "pm25_tons_2020", "has_air_major_permit",
-            "federal_depot_account", "federal_depot_category"]
+            "federal_depot_account", "federal_depot_category", "matched_naics_codes"]
     out = []
     for row in rows:
         r = dict(zip(cols, row))
@@ -92,7 +154,8 @@ def gather_all_epa(con: duckdb.DuckDBPyConnection) -> list[dict]:
             "lat": r["latitude"], "lon": r["longitude"],
             "federal_depot_account": r["federal_depot_account"], "federal_depot_category": r["federal_depot_category"],
             "extra": {k: r[k] for k in ("voc_tons_2017", "voc_tons_2020", "voc_pct_change_2017_2020",
-                                         "voc_trend", "pm10_tons_2020", "pm25_tons_2020", "has_air_major_permit")},
+                                         "voc_trend", "pm10_tons_2020", "pm25_tons_2020", "has_air_major_permit")}
+                     | {"matched_naics_codes": r["matched_naics_codes"] or []},
         })
     return out
 
@@ -185,6 +248,8 @@ def build_universe(con: duckdb.DuckDBPyConnection) -> None:
     for d in dod:
         dod_by_account[d["account_key"]].append(d)
 
+    naics_to_vertical = _naics_to_vertical_map()
+
     facility_rows = []
     account_rows = []
     oversized_buckets = []
@@ -242,6 +307,17 @@ def build_universe(con: duckdb.DuckDBPyConnection) -> None:
             facility_installed_status = "untouched"
             if qualified and facility_installed_status == "untouched":
                 untouched_qualified_count += 1
+
+            # Note: `is not None`, not truthy -- a real VOC/PM reading of
+            # exactly 0.0 is a legitimate NEI match, not "no data", and a
+            # truthy check would have silently conflated the two.
+            voc_tons_2020 = next(
+                (records[m]["extra"].get("voc_tons_2020") for m in c["member_idxs"]
+                 if records[m]["source"] == "epa" and records[m]["extra"].get("voc_tons_2020") is not None),
+                None,
+            )
+            dart_rate, dart_trend, employee_count = facility_dart(records, c["member_idxs"])
+
             facility_rows.append({
                 "facility_id": f"{account_key}::{fi}",
                 "account_id": account_key,
@@ -252,8 +328,10 @@ def build_universe(con: duckdb.DuckDBPyConnection) -> None:
                 "member_source_ids": [f"{records[m]['source']}:{records[m]['source_id']}" for m in c["member_idxs"]],
                 "match_tier": str(c["tier"]), "match_confidence": c["confidence"], "match_reason": c["reason"],
                 "suspect_coordinates": bool(c.get("suspect_coordinate_idxs")),
-                "voc_tons_2020": next((records[m]["extra"].get("voc_tons_2020") for m in c["member_idxs"] if records[m]["source"] == "epa" and records[m]["extra"].get("voc_tons_2020")), None),
+                "facility_vertical": facility_vertical(records, c["member_idxs"], naics_to_vertical),
+                "voc_tons_2020": voc_tons_2020,
                 "has_air_major_permit": any(records[m]["extra"].get("has_air_major_permit") for m in c["member_idxs"] if records[m]["source"] == "epa"),
+                "dart_rate": dart_rate, "dart_trend": dart_trend, "employee_count": employee_count,
                 "dod_awards_here_ttm": dod_amount,
                 "qualified_for_tcv": qualified, "qualification_reason": qual_reason,
                 "installed_status": facility_installed_status,
@@ -284,7 +362,9 @@ def build_universe(con: duckdb.DuckDBPyConnection) -> None:
         "latitude": pl.Float64, "longitude": pl.Float64,
         "sources": pl.List(pl.Utf8), "member_source_ids": pl.List(pl.Utf8),
         "match_tier": pl.Utf8, "match_confidence": pl.Float64, "match_reason": pl.Utf8,
-        "suspect_coordinates": pl.Boolean, "voc_tons_2020": pl.Float64, "has_air_major_permit": pl.Boolean,
+        "suspect_coordinates": pl.Boolean, "facility_vertical": pl.Utf8,
+        "voc_tons_2020": pl.Float64, "has_air_major_permit": pl.Boolean,
+        "dart_rate": pl.Float64, "dart_trend": pl.Utf8, "employee_count": pl.Float64,
         "dod_awards_here_ttm": pl.Float64, "qualified_for_tcv": pl.Boolean, "qualification_reason": pl.Utf8,
         "installed_status": pl.Utf8,
     }
