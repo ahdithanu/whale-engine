@@ -1,0 +1,118 @@
+# Named facility allowlist, not a NAICS filter. These operate under national
+# security / government NAICS or SIC classifications (or none FRS tracks
+# consistently) that fall entirely outside naics_universe.json's commercial
+# manufacturing codes — a NAICS-based ingestion filter will never find them.
+# But depot- and shipyard-level rework, recoat, and overhaul work makes these
+# among the largest surface finishing operations in the country by volume.
+#
+# Matched into EPA FRS by name (facility_name ILIKE any of `aka`) AND
+# location (city/state) — both must agree, not name alone, since generic
+# depot/base naming collides across services (see the resolver's
+# matches_as_company() docstring for why substring-only matching on names
+# already burned us once on OSHKOSH-the-city vs Oshkosh-the-company).
+#
+# Locations verified against official service fact sheets and Navy/Army
+# public sources (2026-08-01), not assumed — several are counterintuitive
+# (Norfolk Naval Shipyard is in Portsmouth VA; Portsmouth Naval Shipyard is
+# in Kittery ME).
+#
+# `aka` entries below are verified directly against real FRS PRIMARY_NAME
+# values (queried NATIONAL_FACILITY_FILE.CSV, 2026-08-01), not guessed —
+# this mattered more than expected. A single bare word like "TINKER" is
+# dangerous on its own: it also matches "Tinker Bell Cleaners", "Tinker's
+# Dam", "Tinker & Rasor", and an entire Colorado gas station chain
+# ("Stinker Stores"). Every `aka` here is the full multi-word phrase
+# confirmed to hit only the real installation.
+
+facilities:
+  # Air Force Air Logistics Complexes
+  - name: "Oklahoma City Air Logistics Complex"
+    aka: ["Tinker Air Force Base", "Tinker AFB", "Oklahoma City Air Logistics Complex"]
+    city: "Oklahoma City"
+    city_aka: ["Midwest City"]
+    state: "OK"
+    account: US_AIR_FORCE
+    category: "Air Force Air Logistics Complex"
+
+  - name: "Ogden Air Logistics Complex"
+    aka: ["Hill Air Force Base", "Hill AFB", "Ogden Air Logistics Complex"]
+    city: "Ogden"
+    city_aka: ["Hill AFB", "Roy", "Layton"]
+    state: "UT"
+    account: US_AIR_FORCE
+    category: "Air Force Air Logistics Complex"
+
+  - name: "Warner Robins Air Logistics Complex"
+    aka: ["Robins Air Force Base", "Robins AFB", "Warner Robins Air Logistics Complex"]
+    city: "Warner Robins"
+    state: "GA"
+    account: US_AIR_FORCE
+    category: "Air Force Air Logistics Complex"
+
+  # Naval shipyards
+  - name: "Norfolk Naval Shipyard"
+    aka: ["Norfolk Naval Shipyard"]
+    city: "Portsmouth"
+    state: "VA"
+    account: US_NAVY
+    category: "Naval Shipyard"
+
+  - name: "Puget Sound Naval Shipyard"
+    aka: ["Puget Sound Naval Shipyard"]
+    city: "Bremerton"
+    state: "WA"
+    account: US_NAVY
+    category: "Naval Shipyard"
+
+  - name: "Pearl Harbor Naval Shipyard"
+    aka: ["Pearl Harbor Naval Shipyard"]
+    city: "Pearl Harbor"
+    city_aka: ["Honolulu", "Pearl City", "Aiea"]
+    state: "HI"
+    account: US_NAVY
+    category: "Naval Shipyard"
+
+  - name: "Portsmouth Naval Shipyard"
+    aka: ["Portsmouth Naval Shipyard"]
+    city: "Kittery"
+    state: "ME"
+    account: US_NAVY
+    category: "Naval Shipyard"
+
+  # Army depots
+  - name: "Anniston Army Depot"
+    aka: ["Anniston Army Depot"]
+    city: "Anniston"
+    city_aka: ["Bynum"]
+    state: "AL"
+    account: US_ARMY
+    category: "Army Depot"
+
+  - name: "Red River Army Depot"
+    aka: ["Red River Army Depot"]
+    city: "Texarkana"
+    state: "TX"
+    account: US_ARMY
+    category: "Army Depot"
+
+  - name: "Letterkenny Army Depot"
+    aka: ["Letterkenny Army Depot"]
+    city: "Chambersburg"
+    state: "PA"
+    account: US_ARMY
+    category: "Army Depot"
+
+  # Marine Corps Logistics Bases
+  - name: "Marine Corps Logistics Base Albany"
+    aka: ["Marine Corps Logistics Base Albany"]
+    city: "Albany"
+    state: "GA"
+    account: US_MARINE_CORPS
+    category: "Marine Corps Logistics Base"
+
+  - name: "Marine Corps Logistics Base Barstow"
+    aka: ["Marine Corps Logistics Base Barstow", "US Marine Corps Logistics Base Barstow"]
+    city: "Barstow"
+    state: "CA"
+    account: US_MARINE_CORPS
+    category: "Marine Corps Logistics Base"

@@ -48,15 +48,30 @@ uncertain, say so and ask. Do not build around a guessed endpoint.
 
 ## Target universe
 
-Defined in `/pipeline/naics_universe.json`. 22 NAICS codes across 6 verticals.
+Defined in `/pipeline/naics_universe.json`. 25 NAICS codes across 7 verticals.
 Validated against the customer's publicly named customers and their seven
 published applications: sanding, grinding, blasting, inspection, polishing,
 buffing, spraying.
 
 Verticals: Aerospace and defense; Aerospace MRO; Maritime; Specialty and heavy
-vehicles; Heavy equipment and machinery; Metal fabrication.
+vehicles; Heavy equipment and machinery; Plastics and composites; Metal
+fabrication.
 
 Do not substitute or "improve" these codes. They were validated deliberately.
+(Plastics and composites — 326199, 326121, 326113 — added 2026-08-01: large
+thermoformers and composite shops run heavy trim and sand labor. The
+qualification gate filters for scale; the NAICS list doesn't need to.)
+
+### Federal depots: named override, not a NAICS filter
+
+Twelve facilities — Air Force Air Logistics Complexes (Tinker, Hill, Robins),
+naval shipyards (Norfolk, Puget Sound, Pearl Harbor, Portsmouth), Army depots
+(Anniston, Red River, Letterkenny), Marine Corps Logistics Bases (Albany,
+Barstow) — are among the largest surface finishing operations in the country
+but file under national-security codes outside the NAICS universe above. See
+`/pipeline/overrides/federal_depots.yaml` and the "EPA FRS" data source
+section below for how these are matched (name AND location, not name alone —
+a bare word like "Tinker" collides with unrelated businesses in FRS).
 
 `naics_universe.json` also carries `scope_questions` — wood millwork/cabinetry
 and marine/RV gelcoat finishing — flagged as unresolved with the customer.
@@ -118,6 +133,22 @@ confirmed against real data (19,516 AIR MAJOR rows in our NAICS set).
 `AIR MAJOR` is the closest available signal to "requires a Title V permit"
 without a separate permit-database join, and is what
 `epa_facilities.has_air_major_permit` is built from.
+
+**Federal depot override:** `epa.py` also matches
+`/pipeline/overrides/federal_depots.yaml`'s 12 named facilities directly
+against `NATIONAL_FACILITY_FILE.CSV` by name AND location, unioning their
+registry IDs in alongside the NAICS-matched set so they flow through the same
+NEI-join and Title V pipeline below. Name alone is not safe: real FRS data
+confirmed a bare word like "TINKER" also matches "Tinker Bell Cleaners" and
+an entire Colorado gas station chain ("Stinker Stores"). Every `aka` entry in
+the override file is a verified full multi-word phrase, checked against real
+`NATIONAL_FACILITY_FILE.CSV` PRIMARY_NAME values before being trusted, and
+the city/state check is a second independent gate. Confirmed 2026-08-01:
+12/12 named depots matched, 90 FRS records total (most large depots have many
+EPA sub-registrations — one project, one demolition, one solar array each —
+same pattern the resolver already handles for Boeing/Caterpillar/Oshkosh).
+`epa_facilities.federal_depot_account` / `federal_depot_category` are NULL
+for everything else.
 
 ### The EPA FRS <-> NEI join: not registry_id-to-registry_id
 
@@ -225,12 +256,12 @@ All five agents read and write this. They never call each other directly.
 
 ```
 ACCOUNT   account_id, legal_name, vertical, whale_score, est_TCV_ceiling,
-          facilities[], people[], deals[]
+          account_is_customer, facilities[], people[], deals[]
 
 FACILITY  facility_id, account_id, address, lat/lon, sqft, employee_band,
           finishing_ops[], air_permit_class, voc_tons_yr,
           osha_dart_rate, ergonomic_recordables_3yr,
-          dod_awards_here_ttm, open_finishing_reqs,
+          dod_awards_here_ttm, open_finishing_reqs, installed_status,
           priority_rank, why_now, est_cells_capacity, est_facility_TCV
 
 PART      part_id, facility_id, geometry_class, material, dimensions,
@@ -243,6 +274,35 @@ PERSON    person_id, account_id, facility_id, title, role_class,
 DEAL      deal_id, account_id, stage, cells_committed, current_TCV,
           ceiling_TCV, expansion_path[], capital_case_id, blockers[]
 ```
+
+**`account_is_customer` (ACCOUNT, bool, default false)** and
+**`installed_status` (FACILITY, `untouched | in_pipeline | installed`,
+default `untouched`) are deliberately separate fields that do NOT inherit
+from one another.** `account_is_customer` means the logo is a customer — it
+says nothing about which of that account's plants have cells.
+`installed_status` is what actually answers "does this specific plant have
+cells," and starts `untouched` for every facility regardless of its
+account's customer status, until a facility-level source specifically says
+otherwise (none does yet — no facility is marked anything but `untouched`
+today).
+
+This was a real bug caught before it shipped, not a hypothetical: an
+earlier version set facility `installed_status` by inheriting the account's
+status. Marking the U.S. Air Force account as a customer would have silently
+marked all three Air Logistics Complex facilities "installed" and zeroed
+them out of the untouched-qualified-TCV count — deleting exactly the signal
+this project exists to surface. The same bug would have quietly removed
+Boeing and Raytheon plants from the headline expansion number. The demo
+argument is "these logos are customers with mostly untouched plant
+networks" — that argument requires the two fields to stay independent.
+`account_is_customer` is seeded from the customer's own public website
+(named/case-study customers) in `/pipeline/overrides/corporate_map.yaml`,
+2026-08-01, so it is not confidential.
+
+Reporting should always show both, per facility count: qualified facilities,
+untouched-qualified facilities, and (once Agent 4 produces real per-cell
+dollar figures — it's still mocked) an untouched TCV ceiling — never a
+single collapsed "installed" number at the account level.
 
 DuckDB tables: `epa_facilities`, `osha_establishments`, `dod_awards`
 (per-source ingestion outputs, consolidated by `merge` into
@@ -332,10 +392,51 @@ uses registry IDs nobody else has. USASpending uses recipient names matching
 neither. Joining these to one physical plant, then to one parent company, is the
 actual technical contribution here.
 
-**Status: proven against the three anchor accounts only** (`pipeline.resolve.anchors`,
-run via `uv run python -m pipeline.resolve.report`), not yet run against the
-full universe. `naics_universe.json`'s anchor accounts exist specifically so
-this claim is checkable, not asserted.
+**Status: proven against the three anchor accounts** (`pipeline.resolve.anchors`,
+run via `uv run python -m pipeline.resolve.report`) **and now run once against
+the full universe** (`pipeline.resolve.universe`, writes real `facilities`/
+`accounts` tables). `naics_universe.json`'s anchor accounts exist specifically
+so the anchor claim is checkable, not asserted.
+
+### Full-universe run: coarser than the anchor run, honestly
+
+`pipeline.resolve.universe` reuses the anchor run's Stage 1 (facility) logic
+unchanged, but Stage 2 (account grouping) has no equivalent to
+`CANDIDATE_PATTERNS` — there's no hand-picked list of identity substrings for
+"every company in the dataset." Accounts form by exact
+`normalize_company_name` match instead, with `corporate_map.yaml` overrides
+layered on top. Confirmed result (2026-08-01): 55,418 facility-candidate
+records collapse into 41,281 account buckets, most of them tiny — real
+companies fragment across sub-facility naming variance (`"CATERPILLAR INC"`
+groups fine; `"OSHKOSH CORP - WEST PLT"` does not group with plain
+`"Oshkosh Corporation"` without an alias). This is the documented, accepted
+limitation, not a bug to chase down before the next session — it means
+`account_is_customer` and `qualified_facilities` are undercounts for named
+customers until more aliases get discovered and added, the same way
+Solar Turbines / Progress Rail / Electro-Motive were found for Caterpillar.
+
+**A real bug was caught and fixed on this run, not a hypothetical:** account
+keys in `corporate_map.yaml` (`OSHKOSH_CORPORATION`, `RAYTHEON_TECHNOLOGIES`)
+don't naturally match what `normalize_company_name` produces for those same
+companies' own facility records (`"Oshkosh Corporation"` normalizes to
+`"OSHKOSH"`, not `"OSHKOSH_CORPORATION"`) — so a company's *own* directly-named
+plants landed in a separate, unflagged bucket from its aliased subsidiaries.
+Fixed by auto-deriving a self-alias from every account's `canonical_name`
+(`pipeline.resolve.universe._effective_alias_map`) rather than requiring one
+hand-written per account. Verified by checking actual resolved output, not
+assumed from reading the code — first run silently undercounted `account_is_customer`
+for exactly this reason (6 of 14 seeded customers matched instead of 10).
+
+Of the 14 accounts seeded `account_is_customer` in `corporate_map.yaml`, 10
+matched at least one real source record as of this run: Boeing (101
+facilities, 39 qualified), Caterpillar (51, 10), Oshkosh Corporation (42,
+14), U.S. Air Force (25, 2 — the Air Logistics Complexes fragment into many
+small EPA sub-registrations, most without their own VOC/Title V data, same
+pattern as Boeing/Caterpillar), Federal Signal, Vactor, Janicki, Miller
+Industries, Productive Plastics, Lawrence Brothers. Four (Raytheon
+Technologies, Planet 9, Magee, Innovative Surface Works) have no matching
+record under their exact name in any of our three sources — reported as a
+gap, not silently dropped.
 
 ### Stage 1: facility resolution
 

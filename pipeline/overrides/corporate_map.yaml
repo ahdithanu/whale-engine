@@ -13,16 +13,92 @@
 # output for candidate subsidiary names that were searched for but not found
 # in any of our three sources, which are intentionally NOT included below.
 
+# account_is_customer: bool, default false. Means "this logo is a customer" —
+# it says NOTHING about which of the account's plants have cells installed.
+# Facility-level installed_status (untouched | in_pipeline | installed,
+# default untouched) is the field that actually answers "does this plant have
+# cells" and does NOT inherit from the account — conflating the two was a
+# real bug caught before it shipped: marking U.S. Air Force account_is_customer
+# would otherwise have marked every Air Logistics Complex facility "installed"
+# and silently deleted them from the untouched-qualified-TCV number, which is
+# the entire demo argument (these logos are customers with mostly untouched
+# plant networks — that's where the $20M lives, not in the first sale).
+# Seeded 2026-08-01 from the customer's own public website (case studies /
+# named customers), so this is not confidential.
 accounts:
   BOEING:
     canonical_name: "The Boeing Company"
     vertical: aerospace_defense
+    account_is_customer: true
   OSHKOSH_CORPORATION:
     canonical_name: "Oshkosh Corporation"
     vertical: specialty_and_heavy_vehicles
+    account_is_customer: true  # covers Pierce transitively via its alias below
   CATERPILLAR:
     canonical_name: "Caterpillar Inc."
     vertical: heavy_equipment_and_machinery
+    account_is_customer: true
+  RAYTHEON_TECHNOLOGIES:
+    canonical_name: "Raytheon Technologies"
+    # Rebranded to "RTX Corporation" in 2023; source data may use either
+    # name. Not yet added as a formal alias -- do that once actually
+    # observed in EPA/OSHA/DoD data rather than guessing the mapping now.
+    vertical: aerospace_defense
+    account_is_customer: true
+  FEDERAL_SIGNAL:
+    canonical_name: "Federal Signal Corporation"
+    vertical: specialty_and_heavy_vehicles
+    account_is_customer: true
+  VACTOR:
+    canonical_name: "Vactor Manufacturing"
+    # Believed to be a Federal Signal brand, not independently confirmed
+    # against source data -- kept as its own account rather than assumed
+    # merged, since it may register independently in EPA/OSHA/DoD data.
+    vertical: specialty_and_heavy_vehicles
+    account_is_customer: true
+  JANICKI:
+    canonical_name: "Janicki Industries"
+    vertical: aerospace_defense
+    account_is_customer: true
+  PRODUCTIVE_PLASTICS:
+    canonical_name: "Productive Plastics"
+    vertical: plastics_and_composites
+    account_is_customer: true
+  PLANET_9:
+    canonical_name: "Planet 9"
+    vertical: null
+    account_is_customer: true
+  MILLER_INDUSTRIES:
+    canonical_name: "Miller Industries"
+    vertical: specialty_and_heavy_vehicles
+    account_is_customer: true
+  MAGEE:
+    canonical_name: "Magee"
+    vertical: null
+    account_is_customer: true
+  INNOVATIVE_SURFACE_WORKS:
+    canonical_name: "Innovative Surface Works"
+    vertical: null
+    account_is_customer: true
+  LAWRENCE_BROTHERS:
+    canonical_name: "Lawrence Brothers"
+    vertical: metal_fabrication
+    account_is_customer: true
+  US_AIR_FORCE:
+    canonical_name: "U.S. Air Force"
+    vertical: null
+    account_is_customer: true
+  # Referenced by /pipeline/overrides/federal_depots.yaml but not in the
+  # customer seed list -- default account_is_customer=false, not assumed.
+  US_NAVY:
+    canonical_name: "U.S. Navy"
+    vertical: null
+  US_ARMY:
+    canonical_name: "U.S. Army"
+    vertical: null
+  US_MARINE_CORPS:
+    canonical_name: "U.S. Marine Corps"
+    vertical: null
 
 # Normalized-name -> account key. Lookup is currently EXACT match on
 # normalize_company_name() output, which is a real limitation: e.g.

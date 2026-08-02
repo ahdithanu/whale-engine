@@ -103,6 +103,25 @@
       ],
       "finishing_labor_note": "Parts exceed the reach and payload of typical fixed robotic cells, so weld grinding and deburring remain manual."
     },
+    "plastics_and_composites": {
+      "name": "Plastics and composites",
+      "naics_codes": {
+        "326199": "All other plastics product manufacturing",
+        "326121": "Unlaminated plastics profile shape manufacturing",
+        "326113": "Unlaminated plastics film and sheet (except packaging) manufacturing"
+      },
+      "part_geometry_classes": [
+        "large thermoformed shells and panels",
+        "extruded profile shapes",
+        "composite layups and trimmed sheet stock"
+      ],
+      "materials": [
+        "ABS and polycarbonate sheet",
+        "fiberglass-reinforced composites",
+        "extruded thermoplastics"
+      ],
+      "finishing_labor_note": "Large thermoformers and composite shops run heavy trim and sand labor removing flash, parting lines, and mold marks from low-volume, high-mix sheet and layup work — the qualification gate filters for scale here, not the NAICS list itself."
+    },
     "metal_fabrication": {
       "name": "Metal fabrication",
       "naics_codes": {

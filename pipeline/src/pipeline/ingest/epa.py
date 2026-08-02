@@ -47,6 +47,19 @@ facility key is "eis facility id", not an FRS Registry ID. The real path is:
     NEI.eis_facility_id  ->  FRS.PGM_SYS_ACRNMS contains "EIS:<that id>"  ->  REGISTRY_ID
 Facilities with no EIS entry in PGM_SYS_ACRNMS don't join to NEI at all; that
 is logged as an unmatched count, not silently dropped.
+
+Federal depot override (/pipeline/overrides/federal_depots.yaml): named
+facilities (Air Force Air Logistics Complexes, naval shipyards, Army depots,
+Marine Corps Logistics Bases) matched into FRS by name AND location, bypassing
+the NAICS filter entirely — they file under national-security codes our
+naics_universe.json was never meant to cover, but depot-level rework and
+recoat work makes them some of the largest finishing operations in the
+country. Matched via `PRIMARY_NAME` containing a verified `aka` phrase AND
+`CITY_NAME`/`STATE_CODE` agreeing — name alone is not safe here. Confirmed
+against real FRS data: a bare word like "TINKER" alone also matches "Tinker
+Bell Cleaners" and an entire gas station chain ("Stinker Stores"); every
+`aka` in the override file is a verified full multi-word phrase, and the
+location check is a second independent gate, not a formality.
 """
 
 import re
@@ -54,10 +67,13 @@ import zipfile
 from pathlib import Path
 
 import duckdb
+import yaml
 
-from pipeline.config import DATA_DIR, EPA_DB_PATH, RAW_DIR
+from pipeline.config import DATA_DIR, EPA_DB_PATH, RAW_DIR, REPO_ROOT
 from pipeline.ingest._download import download_cached
 from pipeline.universe import load_universe
+
+FEDERAL_DEPOTS_PATH = REPO_ROOT / "pipeline" / "overrides" / "federal_depots.yaml"
 
 FRS_URL = "https://ordsext.epa.gov/FLA/www3/state_files/national_combined.zip"
 FRS_FILES_NEEDED = ["NATIONAL_FACILITY_FILE.CSV", "NATIONAL_NAICS_FILE.CSV"]
@@ -106,6 +122,60 @@ def _extract_nei(year: int) -> Path:
         return extract_dir / csv_names[0]
 
 
+FRS_FACILITY_COLUMNS = {
+    'FRS_FACILITY_DETAIL_REPORT_URL': 'VARCHAR', 'REGISTRY_ID': 'VARCHAR', 'PRIMARY_NAME': 'VARCHAR',
+    'LOCATION_ADDRESS': 'VARCHAR', 'SUPPLEMENTAL_LOCATION': 'VARCHAR', 'CITY_NAME': 'VARCHAR',
+    'COUNTY_NAME': 'VARCHAR', 'FIPS_CODE': 'VARCHAR', 'STATE_CODE': 'VARCHAR', 'STATE_NAME': 'VARCHAR',
+    'COUNTRY_NAME': 'VARCHAR', 'POSTAL_CODE': 'VARCHAR', 'FEDERAL_FACILITY_CODE': 'VARCHAR',
+    'FEDERAL_AGENCY_NAME': 'VARCHAR', 'TRIBAL_LAND_CODE': 'VARCHAR', 'TRIBAL_LAND_NAME': 'VARCHAR',
+    'CONGRESSIONAL_DIST_NUM': 'VARCHAR', 'CENSUS_BLOCK_CODE': 'VARCHAR', 'HUC_CODE': 'VARCHAR',
+    'EPA_REGION_CODE': 'VARCHAR', 'SITE_TYPE_NAME': 'VARCHAR', 'LOCATION_DESCRIPTION': 'VARCHAR',
+    'CREATE_DATE': 'VARCHAR', 'UPDATE_DATE': 'VARCHAR', 'US_MEXICO_BORDER_IND': 'VARCHAR',
+    'PGM_SYS_ACRNMS': 'VARCHAR', 'LATITUDE83': 'VARCHAR', 'LONGITUDE83': 'VARCHAR',
+    'CONVEYOR': 'VARCHAR', 'COLLECT_DESC': 'VARCHAR', 'ACCURACY_VALUE': 'VARCHAR',
+    'REF_POINT_DESC': 'VARCHAR', 'HDATUM_DESC': 'VARCHAR', 'SOURCE_DESC': 'VARCHAR',
+}
+
+
+def _sql_str(s: str) -> str:
+    return s.replace("'", "''")
+
+
+def _build_federal_depot_registry_ids(con: duckdb.DuckDBPyConnection, facility_csv: Path) -> None:
+    """Named facility override — see module docstring. Matches by name AND
+    location, bypassing the NAICS filter, so these flow through the same
+    NEI-join / Title V pipeline as everything else."""
+    depots = yaml.safe_load(FEDERAL_DEPOTS_PATH.read_text())["facilities"]
+
+    clauses = []
+    for d in depots:
+        cities = [d["city"]] + d.get("city_aka", [])
+        city_in = ", ".join(f"'{_sql_str(c.upper())}'" for c in cities)
+        name_or = " OR ".join(f"upper(PRIMARY_NAME) LIKE '%{_sql_str(a.upper())}%'" for a in d["aka"])
+        clauses.append(
+            f"WHEN ({name_or}) AND upper(CITY_NAME) IN ({city_in}) AND STATE_CODE = '{_sql_str(d['state'])}' "
+            f"THEN struct_pack(depot_name := '{_sql_str(d['name'])}', account := '{_sql_str(d['account'])}', category := '{_sql_str(d['category'])}')"
+        )
+    case_sql = "CASE " + " ".join(clauses) + " END"
+
+    con.execute(f"""
+        CREATE OR REPLACE TEMP TABLE federal_depot_matches AS
+        SELECT * FROM (
+            SELECT REGISTRY_ID AS registry_id, ({case_sql}) AS depot
+            FROM read_csv('{facility_csv.as_posix()}', columns={FRS_FACILITY_COLUMNS!r}, header=true, quote='"', escape='"')
+        )
+        WHERE depot IS NOT NULL
+    """)
+    n = con.execute("SELECT count(*) FROM federal_depot_matches").fetchone()[0]
+    matched_depot_names = con.execute("SELECT DISTINCT depot.depot_name FROM federal_depot_matches").fetchall()
+    all_depot_names = {d["name"] for d in depots}
+    found_names = {r[0] for r in matched_depot_names}
+    print(f"[ingest.epa] federal depot override: {n} FRS records matched across {len(found_names)}/{len(all_depot_names)} named depots")
+    missing = all_depot_names - found_names
+    if missing:
+        print(f"[ingest.epa] WARNING: no FRS match for: {sorted(missing)} — check aka/city spelling in federal_depots.yaml")
+
+
 def _build_frs_facilities(con: duckdb.DuckDBPyConnection, naics_codes: list[str], facility_csv: Path, naics_csv: Path) -> None:
     naics_list_sql = ", ".join(f"'{c}'" for c in naics_codes)
 
@@ -123,6 +193,16 @@ def _build_frs_facilities(con: duckdb.DuckDBPyConnection, naics_codes: list[str]
         )
         WHERE CAST(NAICS_CODE AS VARCHAR) IN ({naics_list_sql})
         GROUP BY REGISTRY_ID
+    """)
+
+    _build_federal_depot_registry_ids(con, facility_csv)
+    con.execute("""
+        CREATE OR REPLACE TEMP TABLE matched_registry_ids_all AS
+        SELECT registry_id, matched_naics_codes FROM matched_registry_ids
+        UNION
+        SELECT registry_id, CAST([] AS VARCHAR[]) AS matched_naics_codes
+        FROM federal_depot_matches
+        WHERE registry_id NOT IN (SELECT registry_id FROM matched_registry_ids)
     """)
 
     # Title V major-source proxy: FRS records this directly as INTEREST_TYPE =
@@ -157,24 +237,15 @@ def _build_frs_facilities(con: duckdb.DuckDBPyConnection, naics_codes: list[str]
             TRY_CAST(f.LONGITUDE83 AS DOUBLE) AS longitude,
             f.PGM_SYS_ACRNMS AS program_system_ids_raw,
             m.matched_naics_codes AS matched_naics_codes,
-            (am.registry_id IS NOT NULL) AS has_air_major_permit
+            (am.registry_id IS NOT NULL) AS has_air_major_permit,
+            fd.depot.account AS federal_depot_account,
+            fd.depot.category AS federal_depot_category
         FROM read_csv(
-            '{facility_csv.as_posix()}',
-            columns={{'FRS_FACILITY_DETAIL_REPORT_URL': 'VARCHAR', 'REGISTRY_ID': 'VARCHAR', 'PRIMARY_NAME': 'VARCHAR',
-                      'LOCATION_ADDRESS': 'VARCHAR', 'SUPPLEMENTAL_LOCATION': 'VARCHAR', 'CITY_NAME': 'VARCHAR',
-                      'COUNTY_NAME': 'VARCHAR', 'FIPS_CODE': 'VARCHAR', 'STATE_CODE': 'VARCHAR', 'STATE_NAME': 'VARCHAR',
-                      'COUNTRY_NAME': 'VARCHAR', 'POSTAL_CODE': 'VARCHAR', 'FEDERAL_FACILITY_CODE': 'VARCHAR',
-                      'FEDERAL_AGENCY_NAME': 'VARCHAR', 'TRIBAL_LAND_CODE': 'VARCHAR', 'TRIBAL_LAND_NAME': 'VARCHAR',
-                      'CONGRESSIONAL_DIST_NUM': 'VARCHAR', 'CENSUS_BLOCK_CODE': 'VARCHAR', 'HUC_CODE': 'VARCHAR',
-                      'EPA_REGION_CODE': 'VARCHAR', 'SITE_TYPE_NAME': 'VARCHAR', 'LOCATION_DESCRIPTION': 'VARCHAR',
-                      'CREATE_DATE': 'VARCHAR', 'UPDATE_DATE': 'VARCHAR', 'US_MEXICO_BORDER_IND': 'VARCHAR',
-                      'PGM_SYS_ACRNMS': 'VARCHAR', 'LATITUDE83': 'VARCHAR', 'LONGITUDE83': 'VARCHAR',
-                      'CONVEYOR': 'VARCHAR', 'COLLECT_DESC': 'VARCHAR', 'ACCURACY_VALUE': 'VARCHAR',
-                      'REF_POINT_DESC': 'VARCHAR', 'HDATUM_DESC': 'VARCHAR', 'SOURCE_DESC': 'VARCHAR'}},
-            header=true, quote='"', escape='"'
+            '{facility_csv.as_posix()}', columns={FRS_FACILITY_COLUMNS!r}, header=true, quote='"', escape='"'
         ) f
-        JOIN matched_registry_ids m USING (registry_id)
+        JOIN matched_registry_ids_all m USING (registry_id)
         LEFT JOIN air_major_registry_ids am USING (registry_id)
+        LEFT JOIN federal_depot_matches fd USING (registry_id)
     """)
 
     con.execute("""
@@ -245,6 +316,7 @@ def build_epa_facilities(con: duckdb.DuckDBPyConnection) -> int:
         SELECT
             f.registry_id, f.facility_name, f.address, f.city, f.state, f.zip,
             f.latitude, f.longitude, f.matched_naics_codes, f.has_air_major_permit,
+            f.federal_depot_account, f.federal_depot_category,
             f.program_system_ids_raw, f.eis_facility_id,
             n17.voc_tons_2017, n20.voc_tons_2020,
             n17.pm10_tons_2017, n20.pm10_tons_2020,
@@ -267,7 +339,8 @@ def main() -> None:
         n = build_epa_facilities(con)
         n_2020 = con.execute("SELECT count(*) FROM epa_facilities WHERE matched_to_nei_2020").fetchone()[0]
         n_2017 = con.execute("SELECT count(*) FROM epa_facilities WHERE matched_to_nei_2017").fetchone()[0]
-        print(f"[ingest.epa] epa_facilities: {n:,} facilities ({n_2020:,} matched to 2020 NEI, {n_2017:,} matched to 2017 NEI)")
+        n_depot = con.execute("SELECT count(*) FROM epa_facilities WHERE federal_depot_account IS NOT NULL").fetchone()[0]
+        print(f"[ingest.epa] epa_facilities: {n:,} facilities ({n_2020:,} matched to 2020 NEI, {n_2017:,} matched to 2017 NEI, {n_depot:,} from federal depot override)")
     finally:
         con.close()
 
