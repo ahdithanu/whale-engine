@@ -1,0 +1,31 @@
+[project]
+name = "pipeline"
+version = "0.1.0"
+description = "Add your description here"
+authors = [
+    { name = "ahdithebomb", email = "ahdithan.uthayakumar@sjsu.edu" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "duckdb>=1.5.5",
+    "httpx>=0.28.1",
+    "polars>=1.43.2",
+    "pyarrow>=25.0.0",
+    "pyyaml>=6.0.3",
+    "usaddress>=0.5.16",
+]
+
+[project.scripts]
+pipeline = "pipeline:main"
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,75 @@
+# Manual overrides for Stage 2 corporate resolution.
+#
+# Automated normalization (normalize_company_name in pipeline.resolve.normalize)
+# handles exact matches modulo case/punctuation/legal-suffix differences —
+# "Boeing Company" == "THE BOEING COMPANY, INC." — on its own. Everything else
+# (subsidiaries, DBAs, plant nicknames that don't share the parent's name) has
+# to be curated by hand, because there will be many and getting the top few
+# hundred accounts right by hand is worth more than guessing at the rest.
+#
+# `aliases` maps a normalized source name (run through normalize_company_name)
+# to the canonical account key below. Only entries actually observed in
+# EPA/OSHA/DoD source data are kept here — see pipeline.resolve.anchors run
+# output for candidate subsidiary names that were searched for but not found
+# in any of our three sources, which are intentionally NOT included below.
+
+accounts:
+  BOEING:
+    canonical_name: "The Boeing Company"
+    vertical: aerospace_defense
+  OSHKOSH_CORPORATION:
+    canonical_name: "Oshkosh Corporation"
+    vertical: specialty_and_heavy_vehicles
+  CATERPILLAR:
+    canonical_name: "Caterpillar Inc."
+    vertical: heavy_equipment_and_machinery
+
+# Normalized-name -> account key. Lookup is currently EXACT match on
+# normalize_company_name() output, which is a real limitation: e.g.
+# "PROGRESS RAIL SERVICES CORPORATION" and "PROGRESS RAIL SERVICE" normalize
+# to two different strings and each needs its own entry below. The
+# anchor-scoped run worked around this with a broader substring prefilter
+# (see CANDIDATE_PATTERNS in pipeline.resolve.anchors) that doesn't exist in
+# the full-universe resolver yet — that resolver will need prefix/substring
+# alias matching, not just exact, before this file scales past the anchors.
+# Entries below are the real subsidiary names encountered in EPA/OSHA source
+# data during the Boeing/Oshkosh/Caterpillar anchor run (2026-08-01), not
+# hypothetical completions of the CANDIDATE_PATTERNS search list.
+aliases:
+  # Caterpillar
+  "SOLAR TURBINES": CATERPILLAR
+  "SOLAR TURBINES TURBOFAB FACILITY": CATERPILLAR
+  "PROGRESS RAIL SERVICES": CATERPILLAR
+  "PROGRESS RAIL SERVICE": CATERPILLAR
+  "PROGRESS RAIL LOCOMOTIVE": CATERPILLAR
+  "PROGRESS RAIL BOAZ PARTS RECLAMATION": CATERPILLAR
+  "ELECTRO MOTIVE GM 2": CATERPILLAR
+  # Oshkosh Corporation
+  "PIERCE MANUFACTURING": OSHKOSH_CORPORATION
+  "JLG": OSHKOSH_CORPORATION
+  "MCNEILUS TRUCK AND MANUFACTURING": OSHKOSH_CORPORATION
+  "MCNEILUS TRUCK AND MFG": OSHKOSH_CORPORATION
+  "MCNEILUS STEEL": OSHKOSH_CORPORATION
+  "FRONTLINE COMMUNICATIONS": OSHKOSH_CORPORATION
+  "OSHKOSH AEROTECH JETWAY SYSTEMS": OSHKOSH_CORPORATION
+  "OSHKOSH AEROTECH": OSHKOSH_CORPORATION
+  # Boeing
+  "MCDONNELL DOUGLAS": BOEING
+  "MCDONNELL DOUGLAS HELICOPTER": BOEING
+  "INSITU": BOEING
+
+# Candidates searched for but NOT found in any source (2026-08-01 run) --
+# deliberately excluded above rather than guessed:
+#   Oshkosh: PRATT MILLER
+#   Caterpillar: FG WILSON, PERKINS ENGINES
+# "OSHKOSH" as a search pattern also produced confirmed FALSE POSITIVES --
+# unrelated companies physically located in the city of Oshkosh, WI, not
+# subsidiaries (e.g. "Pioneer Metal Finishing Corp - Oshkosh Div", "Advanced
+# Coatings Inc. - Oshkosh"). The resolver's Tier 3 name-similarity gate
+# correctly kept these out of the merged facility clusters (flagged
+# pending_review instead), but they still appear in the OSHKOSH_CORPORATION
+# candidate pool under the current substring-only prefilter. The
+# full-universe resolver needs a real disambiguator here (e.g. require the
+# match be in the company-name field, not fall back to matching against a
+# location that happens to be a city named after the company) before this
+# stops being a manual-review burden at scale.

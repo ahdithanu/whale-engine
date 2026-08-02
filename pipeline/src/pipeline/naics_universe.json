@@ -1,0 +1,161 @@
+{
+  "verticals": {
+    "aerospace_defense": {
+      "name": "Aerospace and defense",
+      "naics_codes": {
+        "336411": "Aircraft manufacturing",
+        "336412": "Aircraft engine and engine parts manufacturing",
+        "336413": "Other aircraft parts and auxiliary equipment manufacturing",
+        "336414": "Guided missile and space vehicle manufacturing",
+        "336419": "Other guided missile and space vehicle parts and auxiliary equipment manufacturing",
+        "332812": "Metal coating, engraving, and allied services to manufacturers"
+      },
+      "part_geometry_classes": [
+        "turbine blades and airfoils",
+        "structural brackets and fittings",
+        "thin-wall sheet metal assemblies",
+        "complex 5-axis machined housings"
+      ],
+      "materials": [
+        "titanium alloys",
+        "nickel superalloys (Inconel)",
+        "aluminum 7075/2024",
+        "carbon fiber composites"
+      ],
+      "finishing_labor_note": "Fatigue- and aero-critical surfaces need tight, traceable tolerances under AS9100/FAA oversight, so deburring, blending, and polishing stay manual instead of fixed-tooled."
+    },
+    "aerospace_mro": {
+      "name": "Aerospace MRO",
+      "naics_codes": {
+        "488190": "Other support activities for air transportation"
+      },
+      "part_geometry_classes": [
+        "large airframe skins and fuselage panels",
+        "control surfaces",
+        "landing gear components"
+      ],
+      "materials": [
+        "aluminum airframe alloys",
+        "composite skins",
+        "corrosion-resistant primers and topcoats"
+      ],
+      "finishing_labor_note": "Airframe stripping, blasting, and repaint during scheduled maintenance is a major, recurring application done largely by hand under OEM paint specs; this segment is easy to miss because it's a services NAICS code, not a manufacturing one."
+    },
+    "maritime": {
+      "name": "Maritime",
+      "naics_codes": {
+        "336611": "Ship building and repairing",
+        "336612": "Boat building"
+      },
+      "part_geometry_classes": [
+        "large weldments and hull plate",
+        "shafts and propellers",
+        "large flat panels"
+      ],
+      "materials": [
+        "marine-grade aluminum",
+        "carbon steel",
+        "stainless steel",
+        "bronze"
+      ],
+      "finishing_labor_note": "Corrosion protection in a saltwater environment demands heavy grinding, blasting, and coating prep over large, awkward hull surfaces that don't fit fixed cells."
+    },
+    "specialty_and_heavy_vehicles": {
+      "name": "Specialty and heavy vehicles",
+      "naics_codes": {
+        "336120": "Heavy duty truck manufacturing",
+        "336992": "Military armored vehicle, tank, and tank component manufacturing",
+        "336211": "Motor vehicle body manufacturing",
+        "336212": "Truck trailer manufacturing",
+        "336213": "Motor home manufacturing",
+        "336214": "Travel trailer and camper manufacturing"
+      },
+      "part_geometry_classes": [
+        "large cab and body panels",
+        "armored hull plate",
+        "frame rails and weldments"
+      ],
+      "materials": [
+        "mild and high-strength steel",
+        "armor steel and aluminum alloys",
+        "aluminum sheet",
+        "fiberglass and composite panels"
+      ],
+      "finishing_labor_note": "High-mix, low-to-mid volume production with cosmetic Class-A or mil-spec coating requirements keeps sanding and grinding manual rather than fixed-automated."
+    },
+    "heavy_equipment_and_machinery": {
+      "name": "Heavy equipment and machinery",
+      "naics_codes": {
+        "333120": "Construction machinery manufacturing",
+        "333111": "Farm machinery and equipment manufacturing",
+        "333924": "Industrial truck, tractor, trailer, and stacker machinery manufacturing",
+        "336510": "Railroad rolling stock manufacturing"
+      },
+      "part_geometry_classes": [
+        "large weldments and castings",
+        "structural frames",
+        "heavy plate assemblies and counterweights"
+      ],
+      "materials": [
+        "high-strength steel",
+        "cast iron",
+        "wear-resistant alloys"
+      ],
+      "finishing_labor_note": "Parts exceed the reach and payload of typical fixed robotic cells, so weld grinding and deburring remain manual."
+    },
+    "metal_fabrication": {
+      "name": "Metal fabrication",
+      "naics_codes": {
+        "332312": "Fabricated structural metal manufacturing",
+        "332323": "Ornamental and architectural metal work manufacturing",
+        "332999": "All other miscellaneous fabricated metal product manufacturing"
+      },
+      "part_geometry_classes": [
+        "structural beams and weldments",
+        "sheet metal enclosures",
+        "custom one-off brackets"
+      ],
+      "materials": [
+        "carbon steel",
+        "stainless steel",
+        "aluminum"
+      ],
+      "finishing_labor_note": "Extreme part variety and small lot sizes make fixed tooling uneconomical, so weld grinding and deburring stay manual job-shop work."
+    }
+  },
+  "anchor_accounts": [
+    {
+      "name": "Boeing",
+      "vertical": "aerospace_defense",
+      "note": "Named GrayMatter customer; ground truth for entity resolution and ties robotic sanding/grinding/blasting/polishing/buffing/inspection/spraying applications to the aerospace_defense vertical."
+    },
+    {
+      "name": "Oshkosh Corporation",
+      "vertical": "specialty_and_heavy_vehicles",
+      "note": "Named GrayMatter customer; ground truth for entity resolution and proof point for the specialty_and_heavy_vehicles vertical (heavy trucks, military and access equipment) across multiple sites."
+    },
+    {
+      "name": "Caterpillar",
+      "vertical": "heavy_equipment_and_machinery",
+      "note": "Named GrayMatter customer; ground truth for entity resolution and proof point for the heavy_equipment_and_machinery vertical across multiple sites, supporting the multi-site expansion thesis."
+    }
+  ],
+  "scope_questions": [
+    {
+      "key": "wood_millwork_cabinetry",
+      "question": "Wood millwork and cabinetry: sanding and buffing labor is heavy here, but it's unconfirmed whether GrayMatter considers this in scope. Resolve with the customer rather than guessing.",
+      "naics_codes": {
+        "321918": "Other millwork, including flooring",
+        "337110": "Wood kitchen cabinet and countertop manufacturing"
+      }
+    },
+    {
+      "key": "marine_rv_gelcoat_finishing",
+      "question": "Marine and RV gelcoat finishing (sanding, buffing, polishing of gelcoat surfaces) may already be covered under the existing 336612 (boat building) and 336214 (travel trailer and camper) codes rather than being a distinct segment. Resolve with the customer before treating it as separate scope.",
+      "naics_codes": {
+        "336612": "Boat building",
+        "336214": "Travel trailer and camper manufacturing"
+      }
+    }
+  ]
+}
