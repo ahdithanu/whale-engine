@@ -42,13 +42,25 @@ import yaml
 from pipeline.config import DUCKDB_PATH, REPO_ROOT
 from pipeline.resolve.geocode import geocode_oneline
 from pipeline.resolve.normalize import (
-    haversine_meters, matches_as_company, name_similarity, normalize_address, normalize_company_name,
+    haversine_meters, looks_like_company_name, matches_as_company, name_similarity,
+    normalize_address, normalize_company_name,
 )
 
 OVERRIDES_PATH = REPO_ROOT / "pipeline" / "overrides" / "corporate_map.yaml"
 
 PROXIMITY_METERS = 750
 NAME_SIM_GATE = 0.6
+# Within this distance, if EITHER side isn't even a company-shaped string
+# (a bare OSHA site code, a "City, ST" descriptor, a generic label), name
+# similarity is skipped entirely rather than used as a gate. Real bug caught
+# against real data (2026-08-11): EPA "THE BOEING COMPANY" vs. OSHA
+# "Auburn, WA (WA001)", 0m apart, scored 0.19 name similarity and queued for
+# review -- not because the identities were in doubt, but because one side
+# of the comparison isn't a name at all. 50m (not the full 750m Tier 2
+# radius) because at that range there's no realistic "two different
+# companies sharing an address" case for the similarity gate to be
+# protecting against.
+AUTO_MERGE_METERS = 50
 MAX_CLUSTER_DIAMETER_METERS = 1_500  # single-linkage chaining can walk a cluster past this even with a 750m pairwise cap
 COORDINATE_CONSENSUS_METERS = 100  # members within this of each other, for suspect-coordinate detection on Tier 1 clusters
 
@@ -265,6 +277,13 @@ def resolve_facilities(records: list[dict]) -> tuple[list[dict], list[dict]]:
             dist = haversine_meters(records[i]["lat"], records[i]["lon"], records[j]["lat"], records[j]["lon"])
             if dist > PROXIMITY_METERS:
                 continue
+            if dist <= AUTO_MERGE_METERS and (
+                not looks_like_company_name(records[i]["name"]) or not looks_like_company_name(records[j]["name"])
+            ):
+                uf.union(i, j)
+                reasons[j].append(f"Tier 2b (0.80, auto): {dist:.0f}m from {records[i]['source']}:{records[i]['name']} -- one side is not a company-shaped string, name similarity gate bypassed")
+                reasons[i].append(f"Tier 2b (0.80, auto): {dist:.0f}m from {records[j]['source']}:{records[j]['name']} -- one side is not a company-shaped string, name similarity gate bypassed")
+                continue
             sim = name_similarity(records[i]["name"], records[j]["name"])
             if sim >= NAME_SIM_GATE:
                 uf.union(i, j)
@@ -295,8 +314,17 @@ def resolve_facilities(records: list[dict]) -> tuple[list[dict], list[dict]]:
             continue
 
         all_reasons = sorted({r for i in idxs for r in reasons[i]})
-        tier = 1 if all("Tier 1" in r for r in all_reasons) else 2
-        confidence = 0.95 if tier == 1 else 0.75
+        if all("Tier 1" in r for r in all_reasons):
+            tier, confidence = 1, 0.95
+        elif all("Tier 1" in r or "Tier 2b" in r for r in all_reasons):
+            # Every pairwise union in this cluster came from an exact address
+            # match or the site-code auto-merge -- never from a real
+            # name-similarity comparison. Distinct confidence from Tier 2 so
+            # "why did this merge happen" stays honest: no name comparison
+            # actually vouched for this cluster.
+            tier, confidence = "2b", 0.80
+        else:
+            tier, confidence = 2, 0.75
 
         if tier == 1:
             # Members share one exact normalized address by construction —

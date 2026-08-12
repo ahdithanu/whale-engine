@@ -133,6 +133,52 @@ def matches_as_company(name: str, pattern: str) -> bool:
     return rest == "" or not rest[0].isalnum()
 
 
+_GENERIC_LOCATION_LABELS = {
+    "plant", "building", "warehouse", "service", "parts", "admin",
+    "administration", "headquarters", "main facility", "corporate",
+    "audit", "machine shop", "facility", "site", "location", "office", "hq",
+}
+
+_US_STATE_CODES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID",
+    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS",
+    "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK",
+    "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV",
+    "WI", "WY", "DC",
+}
+
+_NUMERIC_OR_CODE_RE = re.compile(r"^[\d\s_.\-]+$")
+_CITY_STATE_RE = re.compile(r"^([A-Za-z .'\-]+),\s*([A-Za-z]{2})(\s*\([\w\d]+\))?$")
+_GENERIC_LABEL_RE = re.compile(
+    r"^(" + "|".join(re.escape(g) for g in _GENERIC_LOCATION_LABELS) + r")\s*#?\d*$"
+)
+
+
+def looks_like_company_name(name: str | None) -> bool:
+    """True if `name` looks like it identifies a company -- contains real
+    alphabetic tokens and isn't purely a site code, a bare "City, ST"
+    descriptor, or a generic facility-type label. Used to decide whether
+    name similarity carries any information at all before gating a merge on
+    it (see resolve_facilities' Tier 2b): comparing a real corporate name
+    against something that isn't a name to begin with (an OSHA internal
+    site code, a bare city) always scores low similarity for a reason that
+    has nothing to do with whether the two records are the same facility."""
+    if not name:
+        return False
+    n = name.strip()
+    if len(n) < 3:
+        return False
+    if _NUMERIC_OR_CODE_RE.fullmatch(n):
+        return False
+    m = _CITY_STATE_RE.fullmatch(n)
+    if m and m.group(2).upper() in _US_STATE_CODES:
+        return False
+    norm = re.sub(r"\s+", " ", n.lower()).strip()
+    if _GENERIC_LABEL_RE.fullmatch(norm):
+        return False
+    return True
+
+
 def haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     r = 6_371_000.0
     phi1, phi2 = math.radians(lat1), math.radians(lat2)

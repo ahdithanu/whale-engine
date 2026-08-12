@@ -252,6 +252,7 @@ def build_universe(con: duckdb.DuckDBPyConnection) -> None:
 
     facility_rows = []
     account_rows = []
+    pending_review_rows = []
     oversized_buckets = []
     t0 = time.time()
     for i, (account_key, records) in enumerate(buckets.items()):
@@ -295,11 +296,31 @@ def build_universe(con: duckdb.DuckDBPyConnection) -> None:
         untouched_qualified_count = 0
         for fi, c in enumerate(clusters):
             qualified, qual_reason = qualifies_for_tcv(records, c)
+            fv = facility_vertical(records, c["member_idxs"], naics_to_vertical)
+            # Employee-count-only qualification with no determinable vertical
+            # means we don't even know what industry the site is in -- caught
+            # against real data, not hypothetical: Carvana (car sales, OSHA
+            # employee count only) and G2 Secure Staff (airport ground
+            # handling) both qualified this way, with no VOC data, no air
+            # permit, and no EPA NAICS match at all. VOC or AIR MAJOR
+            # qualification already implies a real EPA/NAICS match, so this
+            # only tightens the employee-only path.
+            if qualified and qual_reason.startswith("OSHA annual_average_employees") and fv is None:
+                qualified = False
+                qual_reason = qual_reason + " -- but no determinable vertical (no EPA NAICS match), so not counted as qualified"
             qualified_count += qualified
             rep = records[c["member_idxs"][0]]
             city_key = ((rep["city"] or "").upper(), (rep["state"] or "").upper())
             dod_here = dod_by_city.get(city_key)
-            dod_amount = dod_here["total_amount"] if dod_here and len(facility_city_idx[city_key]) == 1 else None
+            # Attribute the city total to every facility in that city, tagged
+            # dod_city_shared, rather than dropping the figure entirely when
+            # more than one facility shares a city -- USASpending place of
+            # performance is confirmed city-or-broader, never street-address
+            # precise, so "shared" is the normal case, not an edge case to
+            # hide. The UI is responsible for showing the tag, not this layer
+            # for pretending the ambiguity doesn't exist.
+            dod_amount = dod_here["total_amount"] if dod_here else None
+            dod_city_shared = bool(dod_here and len(facility_city_idx[city_key]) > 1)
             # No per-facility source tells us which specific plants already
             # have cells -- every facility starts "untouched" regardless of
             # whether its account is a customer. Flip this only when we
@@ -311,11 +332,15 @@ def build_universe(con: duckdb.DuckDBPyConnection) -> None:
             # Note: `is not None`, not truthy -- a real VOC/PM reading of
             # exactly 0.0 is a legitimate NEI match, not "no data", and a
             # truthy check would have silently conflated the two.
-            voc_tons_2020 = next(
-                (records[m]["extra"].get("voc_tons_2020") for m in c["member_idxs"]
-                 if records[m]["source"] == "epa" and records[m]["extra"].get("voc_tons_2020") is not None),
-                None,
-            )
+            def _first_epa(field):
+                return next(
+                    (records[m]["extra"].get(field) for m in c["member_idxs"]
+                     if records[m]["source"] == "epa" and records[m]["extra"].get(field) is not None),
+                    None,
+                )
+            voc_tons_2020 = _first_epa("voc_tons_2020")
+            pm10_tons_2020 = _first_epa("pm10_tons_2020")
+            voc_trend = _first_epa("voc_trend") or "no_data"
             dart_rate, dart_trend, employee_count = facility_dart(records, c["member_idxs"])
 
             facility_rows.append({
@@ -328,14 +353,17 @@ def build_universe(con: duckdb.DuckDBPyConnection) -> None:
                 "member_source_ids": [f"{records[m]['source']}:{records[m]['source_id']}" for m in c["member_idxs"]],
                 "match_tier": str(c["tier"]), "match_confidence": c["confidence"], "match_reason": c["reason"],
                 "suspect_coordinates": bool(c.get("suspect_coordinate_idxs")),
-                "facility_vertical": facility_vertical(records, c["member_idxs"], naics_to_vertical),
-                "voc_tons_2020": voc_tons_2020,
+                "facility_vertical": fv,
+                "voc_tons_2020": voc_tons_2020, "voc_trend": voc_trend, "pm10_tons_2020": pm10_tons_2020,
                 "has_air_major_permit": any(records[m]["extra"].get("has_air_major_permit") for m in c["member_idxs"] if records[m]["source"] == "epa"),
                 "dart_rate": dart_rate, "dart_trend": dart_trend, "employee_count": employee_count,
-                "dod_awards_here_ttm": dod_amount,
+                "dod_awards_here_ttm": dod_amount, "dod_city_shared": dod_city_shared,
                 "qualified_for_tcv": qualified, "qualification_reason": qual_reason,
                 "installed_status": facility_installed_status,
             })
+
+        for p in pending:
+            pending_review_rows.append({"account_id": account_key, **p})
 
         account_rows.append({
             "account_id": account_key,
@@ -363,9 +391,11 @@ def build_universe(con: duckdb.DuckDBPyConnection) -> None:
         "sources": pl.List(pl.Utf8), "member_source_ids": pl.List(pl.Utf8),
         "match_tier": pl.Utf8, "match_confidence": pl.Float64, "match_reason": pl.Utf8,
         "suspect_coordinates": pl.Boolean, "facility_vertical": pl.Utf8,
-        "voc_tons_2020": pl.Float64, "has_air_major_permit": pl.Boolean,
+        "voc_tons_2020": pl.Float64, "voc_trend": pl.Utf8, "pm10_tons_2020": pl.Float64,
+        "has_air_major_permit": pl.Boolean,
         "dart_rate": pl.Float64, "dart_trend": pl.Utf8, "employee_count": pl.Float64,
-        "dod_awards_here_ttm": pl.Float64, "qualified_for_tcv": pl.Boolean, "qualification_reason": pl.Utf8,
+        "dod_awards_here_ttm": pl.Float64, "dod_city_shared": pl.Boolean,
+        "qualified_for_tcv": pl.Boolean, "qualification_reason": pl.Utf8,
         "installed_status": pl.Utf8,
     }
     account_schema = {
@@ -373,8 +403,13 @@ def build_universe(con: duckdb.DuckDBPyConnection) -> None:
         "total_facilities": pl.Int64, "qualified_facilities": pl.Int64,
         "untouched_qualified_facilities": pl.Int64, "pending_review_count": pl.Int64,
     }
+    pending_review_schema = {
+        "account_id": pl.Utf8, "record_a": pl.Utf8, "record_b": pl.Utf8,
+        "distance_m": pl.Float64, "name_similarity": pl.Float64, "reason": pl.Utf8,
+    }
     facilities_df = pl.DataFrame(facility_rows, schema=facility_schema)
     accounts_df = pl.DataFrame(account_rows, schema=account_schema)
+    pending_review_df = pl.DataFrame(pending_review_rows, schema=pending_review_schema)
 
     con.register("facilities_out", facilities_df)
     con.execute("CREATE OR REPLACE TABLE facilities AS SELECT * FROM facilities_out")
@@ -384,7 +419,11 @@ def build_universe(con: duckdb.DuckDBPyConnection) -> None:
     con.execute("CREATE OR REPLACE TABLE accounts AS SELECT * FROM accounts_out")
     con.unregister("accounts_out")
 
-    print(f"[resolve.universe] wrote {len(facility_rows):,} facilities across {len(account_rows):,} accounts")
+    con.register("pending_review_out", pending_review_df)
+    con.execute("CREATE OR REPLACE TABLE pending_review AS SELECT * FROM pending_review_out")
+    con.unregister("pending_review_out")
+
+    print(f"[resolve.universe] wrote {len(facility_rows):,} facilities across {len(account_rows):,} accounts, {len(pending_review_rows):,} pending_review entries")
     customer_n = sum(1 for a in account_rows if a["account_is_customer"])
     qualified_n = sum(a["qualified_facilities"] for a in account_rows)
     untouched_qualified_n = sum(a["untouched_qualified_facilities"] for a in account_rows)

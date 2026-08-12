@@ -45,6 +45,12 @@ accounts:
     # observed in EPA/OSHA/DoD data rather than guessing the mapping now.
     vertical: aerospace_defense
     account_is_customer: true
+  LOCKHEED_MARTIN:
+    canonical_name: "Lockheed Martin"
+    # Not in the customer seed list -- account_is_customer left at its
+    # default (false), same as U.S. Navy/Army/Marine Corps above. This is a
+    # resolver-fragmentation fix, not a customer-status claim.
+    vertical: aerospace_defense
   FEDERAL_SIGNAL:
     canonical_name: "Federal Signal Corporation"
     vertical: specialty_and_heavy_vehicles
@@ -150,6 +156,17 @@ aliases:
   "ROCKWELL COLLINS": RAYTHEON_TECHNOLOGIES
   "GOODRICH": RAYTHEON_TECHNOLOGIES
   "PRATT AND WHITNEY": RAYTHEON_TECHNOLOGIES
+  # Lockheed Martin -- found 2026-08-02: the dashboard's own whale-tier list
+  # surfaced this one, not a blind search. Same fragmentation pattern as
+  # Raytheon/RTX before its aliases were added: "Lockheed Martin - Missiles &
+  # Fire Control" and "Lockheed Martin Aeronautics Company" don't share a
+  # normalized name with plain "Lockheed Martin" and were resolving into
+  # three separate accounts. Keys computed via normalize_company_name, not
+  # guessed by hand. "Lockheed Martin" itself needs no explicit alias here --
+  # it self-matches the LOCKHEED_MARTIN account key via the canonical_name
+  # self-alias (_effective_alias_map).
+  "LOCKHEED MARTIN MISSILES AND FIRE CONTROL": LOCKHEED_MARTIN
+  "LOCKHEED MARTIN AERONAUTICS": LOCKHEED_MARTIN
 
 # Candidates searched for but NOT found in any source (2026-08-01 run) --
 # deliberately excluded above rather than guessed:

@@ -3,12 +3,32 @@
 # this file and rerun `make score`, no code change required.
 
 # Must sum to 1.0 -- score.py asserts this rather than silently renormalizing.
+#
+# voc_trend_percentile is a later addition: the original 5-signal spec had
+# VOC trend as descriptive-only (why_now text, not scored). Promoted to a
+# real 6th weighted signal by explicit instruction once the dashboard design
+# called for it as its own slider. Rebalanced by splitting the original 0.30
+# VOC allocation into level (0.22) and trend (0.08) -- dart/dod/employee/
+# permit are UNCHANGED from the original literal spec, since those weights
+# were never in question. This split is a starting point, not a considered
+# business decision -- it's a slider in the UI, expected to be argued with.
 weights:
-  voc_tonnage_percentile: 0.30   # strongest proxy for coating/finishing scale
+  voc_tonnage_percentile: 0.22   # strongest proxy for coating/finishing scale
+  voc_trend_percentile: 0.08     # growing VOC output despite 2020 dip = expanding ops
   dart_rate_and_trend: 0.25      # ergonomic injury cost is the wedge
   dod_awards_log_scaled: 0.20    # backlog and reshoring signal
   employee_count_band: 0.15      # plant size
   air_permit_class: 0.10         # Title V vs minor source
+
+# VOC trend (see epa.py: 2017-vs-2020 NEI comparison) -> 0-100 score, same
+# shape as the DART trend mapping below. "up" (growing despite the COVID
+# dip) scores highest -- it's evidence of an expanding finishing operation,
+# not backward-looking noise to average away.
+voc_trend_scores:
+  up: 100
+  flat: 50
+  down: 0
+  no_data: 50
 
 # The DART component (weight above) splits into rate-level and trend-direction
 # sub-components. A facility with a high DART rate that's actively getting
@@ -60,3 +80,46 @@ assumptions:
   # employee_count_suspect=true rather than either trusted or silently
   # dropped. Raise this if a real facility legitimately exceeds it later.
   employee_count_sanity_cap: 41250
+
+# Replaces the old single flat max_cells_per_facility=12 cap. That flat cap
+# meant almost every large qualified facility (anything with actual or
+# estimated finishing headcount above 48, i.e. 12 cells * employees_per_cell)
+# converged on the exact same est_cells_capacity=12 -> est_facility_TCV=
+# $7.2M (12 * per_cell_tcv_usd above), regardless of whether the site was a
+# 172,000-employee aerospace plant or a 1,600-employee shipyard -- a reader
+# dividing any capped row by per_cell_tcv_usd would see the TCV column was
+# really just a facility-size counter with a dollar sign on it.
+#
+# facility_magnitude (score.py::_facility_magnitude) is the unweighted
+# average of three signals already computed elsewhere in score.py for other
+# purposes -- employee_band score, voc_tonnage_percentile (within vertical),
+# and air_permit score (100 if AIR MAJOR else 0) -- each already 0-100, so
+# this introduces no new weighting scheme or data source. Missing data
+# contributes 0 to its component, same "missing data = 0, never
+# renormalized" rule as the rest of this file.
+#
+# These five rows are control points, not flat steps: score.py linearly
+# interpolates max_cells between consecutive points on the facility's exact
+# magnitude value (clamped to the first/last point's cells outside [0,100]).
+# A first version of this used each row as a flat step (every facility in a
+# band got the exact same ceiling), and checking real output caught the same
+# collision bug in miniature -- ten unrelated companies with real headcounts
+# from 905 to 3,350 all landed on the identical 40-cell/$24M ceiling because
+# they all cleared the top band. Interpolating means two facilities only
+# land on the same capped figure now if their magnitude scores are
+# genuinely close, not merely "both above 70."
+#
+# The top two control points (28, 32) were calibrated, not guessed: an
+# earlier pass through (12,16,24,40,60) also killed the collision bug but
+# let a SINGLE mega-facility cross the $20M whale-tier bar alone, pushing
+# whale-account count from 6 to 87 -- a real regression against CLAUDE.md's
+# "$20M account is not one purchase, it's 8-15 plants" thesis. This
+# calibration keeps whale count near the pre-fix baseline (14 vs. 18) with
+# zero TCV collisions between whale-tier accounts of different facility
+# counts, confirmed with the customer before shipping (2026-08-11).
+facility_magnitude_tiers:
+  - {min_magnitude: 0,  max_cells: 12}   # small/typical qualified facility -- same floor as the old flat cap
+  - {min_magnitude: 20, max_cells: 16}   # mid-size plant
+  - {min_magnitude: 45, max_cells: 24}   # large plant
+  - {min_magnitude: 70, max_cells: 28}   # mega-site: AIR MAJOR, top employee band, high VOC percentile in vertical
+  - {min_magnitude: 100, max_cells: 32}  # ceiling anchor -- even the single largest-magnitude facility tops out here
