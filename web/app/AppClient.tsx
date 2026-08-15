@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import type { CellConfig } from "@/components/CellConfigurator3D";
 import {
   Account,
   Facility,
@@ -12,7 +14,7 @@ import {
   DEFAULT_WEIGHTS,
   isGovernmentEndUser,
 } from "@/lib/types";
-import { rollupAccounts, scoreFacility, nSignalsPresent, money, AccountRollup } from "@/lib/scoring";
+import { rollupAccounts, scoreFacility, nSignalsPresent, money, AccountRollup, facilityQualifies } from "@/lib/scoring";
 import { resolveFacilityDisplayName, resolveAccountDisplayName } from "@/lib/displayName";
 
 const C = {
@@ -37,6 +39,18 @@ const C = {
 
 const MONO = "var(--font-plex-mono), monospace";
 const SANS = "var(--font-plex-sans), Helvetica, sans-serif";
+
+// WebGL/Three.js is browser-only -- ssr:false keeps it out of the server
+// component render path (this file is already "use client", but the Canvas
+// itself still can't run during Next's build-time prerender).
+const CellConfigurator3D = dynamic(() => import("@/components/CellConfigurator3D"), {
+  ssr: false,
+  loading: () => (
+    <div style={{ height: 420, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: MONO, fontSize: 10, letterSpacing: "0.1em", color: "#5F6D76" }}>
+      LOADING 3D SCENE…
+    </div>
+  ),
+});
 
 type View = "accounts" | "account" | "facility" | "map" | "review" | "brief";
 
@@ -270,14 +284,27 @@ export default function AppClient({
         )}
 
         {view === "map" && (
-          <MapView
-            facilities={acctId ? facilities.filter((f) => f.account_id === acctId) : facilities}
-            accounts={accounts}
-            title={acctId ? `${resolveAccountDisplayName(accounts.find((a) => a.account_id === acctId)?.legal_name ?? "", accounts.find((a) => a.account_id === acctId)?.vertical_name ?? null)} NETWORK` : "ALL RESOLVED PLANTS"}
-            zoom={zoom}
-            setZoom={setZoom}
-            onOpenFacility={(id) => { setFacId(id); setView("facility"); }}
-          />
+          <>
+            {!acctId && (
+              <div style={{ padding: "14px 16px 0" }}>
+                <RegionalPriorityPanel
+                  facilities={facilities}
+                  accounts={accounts}
+                  weights={weights}
+                  threshold={threshold}
+                  onOpenAccount={(id) => { setAcctId(id); setView("account"); setStatusFilter("all"); }}
+                />
+              </div>
+            )}
+            <MapView
+              facilities={acctId ? facilities.filter((f) => f.account_id === acctId) : facilities}
+              accounts={accounts}
+              title={acctId ? `${resolveAccountDisplayName(accounts.find((a) => a.account_id === acctId)?.legal_name ?? "", accounts.find((a) => a.account_id === acctId)?.vertical_name ?? null)} NETWORK` : "ALL RESOLVED PLANTS"}
+              zoom={zoom}
+              setZoom={setZoom}
+              onOpenFacility={(id) => { setFacId(id); setView("facility"); }}
+            />
+          </>
         )}
 
         {view === "review" && <ReviewQueueView reviews={pendingReviews} />}
@@ -549,6 +576,16 @@ function AccountDetailView({
           {rollup.qualifiedCount} of {rollup.facilities.length} plants clear the signal threshold. Cells are installed in {installedCount}. {rollup.untouchedQualifiedCount} qualified plants have never been touched — that is {money(rollup.untouchedTcv)} inside
           {rollup.account.account_is_customer ? " a logo that already signs our paper." : " a logo that is not yet a customer."}
         </div>
+        {rollup.account.news_note && (
+          <div style={{ marginTop: 14, padding: "10px 12px", background: C.panel2, border: `1px solid ${C.border}`, borderLeft: `2px solid ${C.accent}` }}>
+            <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: "0.12em", color: C.accent }}>WHY CALL THEM THIS WEEK</div>
+            <div style={{ fontSize: 12.5, color: C.text2, marginTop: 5 }}>{rollup.account.news_note.text}</div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 6 }}>
+              <a href={rollup.account.news_note.url} target="_blank" rel="noopener noreferrer" style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>SOURCE →</a>
+              <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint2 }}>ADDED {rollup.account.news_note.date}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "18px 0 10px", flexWrap: "wrap" }}>
@@ -700,6 +737,133 @@ function FacilityDetailView({
             </div>
           </div>
         </div>
+      </div>
+
+      <div style={{ marginTop: 14 }}>
+        <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.14em", color: C.faint, marginBottom: 8 }}>VISUALIZE CELL CONFIGURATION</div>
+        <CellReferencePanel key={facility.facility_id} facility={facility} accountName={resolveAccountDisplayName(account.legal_name, account.vertical_name)} />
+      </div>
+    </div>
+  );
+}
+
+// Standard 5-region US GTM/sales-territory grouping of each facility's
+// `state` -- a business categorization layered on top of the real,
+// EPA/OSHA-sourced state field, not itself a federal data field. Every
+// state + DC maps to exactly one region; anything else (bad/missing state)
+// falls through to null and is excluded from the regional rollup rather
+// than silently bucketed into a wrong region.
+const STATE_TO_REGION: Record<string, string> = {
+  CT: "Northeast", ME: "Northeast", MA: "Northeast", NH: "Northeast", RI: "Northeast", VT: "Northeast", NJ: "Northeast", NY: "Northeast", PA: "Northeast",
+  AL: "Southeast", AR: "Southeast", FL: "Southeast", GA: "Southeast", KY: "Southeast", LA: "Southeast", MS: "Southeast", NC: "Southeast", SC: "Southeast", TN: "Southeast", VA: "Southeast", WV: "Southeast", DC: "Southeast",
+  IL: "Midwest", IN: "Midwest", IA: "Midwest", KS: "Midwest", MI: "Midwest", MN: "Midwest", MO: "Midwest", NE: "Midwest", ND: "Midwest", OH: "Midwest", SD: "Midwest", WI: "Midwest",
+  AZ: "Southwest", NM: "Southwest", OK: "Southwest", TX: "Southwest",
+  AK: "West", CA: "West", CO: "West", HI: "West", ID: "West", MT: "West", NV: "West", OR: "West", UT: "West", WA: "West", WY: "West",
+};
+
+type RegionAccountRow = { account_id: string; legal_name: string; is_customer: boolean; tcv: number; facilityCount: number; hasNewsNote: boolean };
+type RegionRollup = { region: string; tcv: number; accountCount: number; facilityCount: number; topAccounts: RegionAccountRow[] };
+
+/** Per-(region, account) untouched-qualified TCV under the CURRENT live
+ * weights/threshold -- the thing the account table and the old scatter map
+ * both fail to answer: not "how much is out there" but "in this region,
+ * specifically who do I call, ranked by how much it's worth." */
+function computeRegionRollups(
+  facilities: Facility[],
+  accountNames: Record<string, { legal_name: string; is_customer: boolean; hasNewsNote: boolean }>,
+  weights: Weights,
+  qualifyThreshold: number
+): RegionRollup[] {
+  const byRegionAccount = new Map<string, Map<string, RegionAccountRow>>();
+  facilities.forEach((f) => {
+    if (f.installed_status !== "untouched") return;
+    if (!facilityQualifies(f, weights, qualifyThreshold)) return;
+    const region = f.state ? STATE_TO_REGION[f.state] : undefined;
+    if (!region) return;
+    if (!byRegionAccount.has(region)) byRegionAccount.set(region, new Map());
+    const acctMap = byRegionAccount.get(region)!;
+    const meta = accountNames[f.account_id];
+    if (!acctMap.has(f.account_id)) {
+      acctMap.set(f.account_id, { account_id: f.account_id, legal_name: meta?.legal_name ?? f.account_id, is_customer: meta?.is_customer ?? false, tcv: 0, facilityCount: 0, hasNewsNote: meta?.hasNewsNote ?? false });
+    }
+    const row = acctMap.get(f.account_id)!;
+    row.tcv += f.est_facility_tcv;
+    row.facilityCount++;
+  });
+
+  const rollups: RegionRollup[] = [...byRegionAccount.entries()].map(([region, acctMap]) => {
+    const rows = [...acctMap.values()].sort((a, b) => b.tcv - a.tcv);
+    return {
+      region,
+      tcv: rows.reduce((s, r) => s + r.tcv, 0),
+      accountCount: rows.length,
+      facilityCount: rows.reduce((s, r) => s + r.facilityCount, 0),
+      topAccounts: rows.slice(0, 5),
+    };
+  });
+  rollups.sort((a, b) => b.tcv - a.tcv);
+  return rollups;
+}
+
+function RegionalPriorityPanel({
+  facilities,
+  accounts,
+  weights,
+  threshold,
+  onOpenAccount,
+}: {
+  facilities: Facility[];
+  accounts: Account[];
+  weights: Weights;
+  threshold: number;
+  onOpenAccount: (id: string) => void;
+}) {
+  const accountNames: Record<string, { legal_name: string; is_customer: boolean; hasNewsNote: boolean }> = {};
+  accounts.forEach((a) => { accountNames[a.account_id] = { legal_name: a.legal_name, is_customer: a.account_is_customer, hasNewsNote: !!a.news_note }; });
+  const regions = useMemo(
+    () => computeRegionRollups(facilities, accountNames, weights, threshold),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [facilities, accounts, weights, threshold]
+  );
+
+  if (regions.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: "0.14em", color: C.accent, marginBottom: 2 }}>REGIONAL PRIORITY</div>
+      <div style={{ fontSize: 12, color: C.faint, marginBottom: 10, maxWidth: 720 }}>
+        Untouched qualified TCV rolled up by region, ranked by named accounts worth calling first — not just where the dots are.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
+        {regions.map((r) => (
+          <div key={r.region} style={{ background: C.panel, border: `1px solid ${C.border}`, padding: "12px 14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: "0.1em", color: C.text }}>{r.region.toUpperCase()}</div>
+              <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>TOP {r.topAccounts.length} OF {r.accountCount}</div>
+            </div>
+            <div style={{ fontFamily: MONO, fontSize: 20, fontWeight: 600, color: C.accent, marginTop: 4 }}>{money(r.tcv)}</div>
+            <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint2, marginTop: 2 }}>{r.facilityCount} untouched qualified plants</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
+              {r.topAccounts.map((a) => (
+                <div
+                  key={a.account_id}
+                  onClick={() => onOpenAccount(a.account_id)}
+                  style={{ display: "flex", justifyContent: "space-between", gap: 8, cursor: "pointer", padding: "3px 0", borderTop: `1px solid ${C.rowBorder}` }}
+                >
+                  <div style={{ fontSize: 12, color: C.muted2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {a.hasNewsNote && <span title="Has a why-call-them note" style={{ color: C.accent, marginRight: 5 }}>●</span>}
+                    {resolveAccountDisplayName(a.legal_name, null)}
+                    {a.is_customer && <span style={{ fontFamily: MONO, fontSize: 8.5, color: C.accent, marginLeft: 6 }}>CUSTOMER</span>}
+                  </div>
+                  <div style={{ fontFamily: MONO, fontSize: 11.5, color: C.muted, whiteSpace: "nowrap" }}>{money(a.tcv)} · {a.facilityCount}pl</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontFamily: MONO, fontSize: 9, color: C.faint2, marginTop: 8 }}>
+        REGIONS ARE A STANDARD 5-REGION GTM GROUPING OF EACH PLANT&apos;S STATE (NORTHEAST · SOUTHEAST · MIDWEST · SOUTHWEST · WEST) — A BUSINESS CATEGORIZATION, NOT A FEDERAL DATA FIELD.
       </div>
     </div>
   );
@@ -923,10 +1087,214 @@ function BriefView() {
           <span style={{ color: C.faint, fontFamily: MONO, fontSize: 11, letterSpacing: "0.08em" }}>STATUS&nbsp;&nbsp;</span>
           The Facility Signal Engine (Agent 1, which resolves and ranks plants — this app) is live on real data. Four additional agents in the planned system — Part Fit Qualifier, Multithread Map, Capital Case Builder, Expansion Engine — are architecture, not built.
         </div>
+        <CellReferencePanel />
         <div style={{ fontSize: 13, lineHeight: 1.5, color: C.muted }}>
           <span style={{ color: C.faint, fontFamily: MONO, fontSize: 11, letterSpacing: "0.08em" }}>PROVENANCE&nbsp;&nbsp;</span>
           Customer status is inferred from the public logo wall, not a CRM. Installed and pipeline flags require a CRM join and are currently unpopulated, so every qualified plant defaults to untouched.
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Illustrative equipment-class reference for Part Fit Qualifier (Agent 2,
+// architecture only) -- makes "will the robot work here" concrete before
+// that agent is real. Specs are a real published reference class (FANUC /
+// Preston Eastin), not a measurement of any resolved facility in this
+// dataset, so it's labeled as illustrative rather than left ambiguous next
+// to the EPA/OSHA/USASpending-sourced numbers everywhere else in the app.
+function ToggleRow<T extends string>({ options, value, onChange }: { options: [T, string][]; value: T; onChange: (v: T) => void }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 0 }}>
+      {options.map(([val, label]) => {
+        const on = value === val;
+        return (
+          <div
+            key={val}
+            onClick={() => onChange(val)}
+            style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.08em", padding: "5px 8px", border: `1px solid ${on ? C.accentDim : C.chipBorder}`, color: on ? C.accent : C.muted3, cursor: "pointer", whiteSpace: "nowrap" }}
+          >
+            {label}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function LabeledSlider({ label, value, unit, min, max, onChange }: { label: string; value: number; unit: string; min: number; max: number; onChange: (v: number) => void }) {
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+        <div style={{ fontSize: 11, color: C.muted2, whiteSpace: "nowrap" }}>{label}</div>
+        <div style={{ fontFamily: MONO, fontSize: 11.5, color: C.accent }}>{value}{unit}</div>
+      </div>
+      <input type="range" min={min} max={max} step={1} value={value} onChange={(e) => onChange(parseInt(e.target.value, 10))} style={{ width: "100%", marginTop: 6, display: "block" }} />
+    </div>
+  );
+}
+
+const MOUNT_OPTIONS: [CellConfig["mount"], string][] = [["top", "TOP MOUNT"], ["side", "SIDE HUNG"], ["wall", "BOOTH WALL"]];
+const ROBOT_OPTIONS: [string, string][] = [["1", "SINGLE ROBOT"], ["2", "DUAL ROBOTS"]];
+const CAMERA_OPTIONS: [CellConfig["cameraView"], string][] = [["iso", "ISOMETRIC"], ["top", "TOP"], ["side", "SIDE"]];
+const CARRIAGE_PRESETS: [string, number, number, number, number][] = [
+  // label, carriagePct, baseSwing, shoulder, elbow
+  ["HOME", -50, 0, 0, 0],
+  ["WORK", -28, 12, -14, 24],
+  ["REACH", 40, -8, -32, 46],
+  ["SERVICE", 100, 0, 40, -10],
+];
+const LAYER_KEYS: [keyof CellConfig["layers"], string][] = [
+  ["walls", "WALLS"], ["roof", "ROOF"], ["workpiece", "WORKPIECE"],
+  ["reach", "REACH"], ["dimensions", "DIMENSIONS"], ["floor", "FLOOR"],
+];
+
+function CellReferencePanel({ facility, accountName }: { facility?: Facility; accountName?: string } = {}) {
+  const [mount, setMount] = useState<CellConfig["mount"]>("top");
+  // Single/dual is the only cell-count the geometry can honestly show on one
+  // cart. When scoped to a real facility, default it from that facility's
+  // actual est_cells_capacity (a real, already-computed number) instead of
+  // always starting at 1 -- a facility we estimate supports 2+ cells should
+  // open showing the dual-RTU configuration, not the generic single default.
+  const [robots, setRobots] = useState<1 | 2>(facility && facility.est_cells_capacity >= 2 ? 2 : 1);
+  const [carriagePct, setCarriagePct] = useState(-28);
+  const [baseSwing, setBaseSwing] = useState(12);
+  const [shoulder, setShoulder] = useState(-14);
+  const [elbow, setElbow] = useState(24);
+  const [cameraView, setCameraView] = useState<CellConfig["cameraView"]>("iso");
+  const [layers, setLayers] = useState<CellConfig["layers"]>({
+    walls: true, roof: false, workpiece: true, reach: false, dimensions: true, floor: true,
+  });
+
+  const config: CellConfig = { mount, robots, carriagePct, baseSwing, shoulder, elbow, layers, cameraView };
+
+  const specs: [string, string][] = [
+    ["ROBOT", "FANUC M-710iC/20L"],
+    ["REACH", "3,110 mm"],
+    ["RTU CLASS", "Preston Eastin RTUM35"],
+    ["RTU ENVELOPE", "1,012 mm wide"],
+    ["RATED CAPACITY", "1,800 kg"],
+  ];
+  const tradeoffs: [string, number, string][] = [
+    ["Clear loading deck", 35, "REDUCED"],
+    ["Booth-side access", 90, "STRONG"],
+    ["Structural demand", 55, "MODERATE"],
+  ];
+  return (
+    <div style={{ padding: 14, background: C.panel2, border: `1px solid ${C.border}` }}>
+      <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: "0.1em", color: C.faint }}>
+        ILLUSTRATIVE GEOMETRY — REFERENCE EQUIPMENT CLASS, NOT A MEASUREMENT OF ANY FACILITY'S ACTUAL FLOOR PLAN
+      </div>
+      <div style={{ fontSize: 12.5, lineHeight: 1.5, color: C.muted, marginTop: 8 }}>
+        {facility
+          ? "A schematic rendering of a rail-mounted robot cart in a blast or finishing booth. The booth/cart/rail/reach geometry is a reference concept, not measured at this plant — EPA and OSHA don't report floor plans. What IS real: the cell count below."
+          : "A concrete, interactive example of what Part Fit Qualifier would evaluate at a facility: a rail-mounted robot cart in a blast or finishing booth. Every mesh below is authored geometry driven by the sliders — not an imported model — sized to the booth/cart/travel/reach figures in the spec grid."}
+      </div>
+
+      {facility && (
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 10, padding: "9px 12px", background: C.panel, border: `1px solid ${C.accentDim}`, flexWrap: "wrap" }}>
+          <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.1em", color: C.accent }}>REAL DATA</div>
+          <div style={{ fontSize: 12.5, color: C.text2 }}>
+            {accountName ?? "This account"} — {resolveFacilityDisplayName(facility.facility_name, facility.epa_frs_name, accountName ?? "Unknown account", facility.city)} is estimated to support{" "}
+            <span style={{ fontFamily: MONO, color: C.accent }}>{facility.est_cells_capacity} cell{facility.est_cells_capacity === 1 ? "" : "s"}</span>
+            {facility.tcv_is_derived ? ` (derived estimate, ${facility.tcv_basis.replace(/_/g, " ")})` : " (actual OSHA headcount)"} — the robot-count toggle below defaults from this number.
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 16, marginTop: 14, flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 200px", minWidth: 190, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.1em", color: C.faint2, marginBottom: 6 }}>01 / CONFIGURATION</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <ToggleRow options={MOUNT_OPTIONS} value={mount} onChange={setMount} />
+              <ToggleRow options={ROBOT_OPTIONS} value={String(robots)} onChange={(v) => setRobots(v === "2" ? 2 : 1)} />
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.1em", color: C.faint2, marginBottom: 6 }}>02 / CARRIAGE POSITION</div>
+            <div style={{ display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
+              {CARRIAGE_PRESETS.map(([label, pct, bs, sh, el]) => (
+                <div
+                  key={label}
+                  onClick={() => { setCarriagePct(pct); setBaseSwing(bs); setShoulder(sh); setElbow(el); }}
+                  style={{ fontFamily: MONO, fontSize: 9, letterSpacing: "0.06em", padding: "4px 7px", border: `1px solid ${C.chipBorder}`, color: C.muted3, cursor: "pointer" }}
+                >
+                  {label}
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <LabeledSlider label="Carriage" value={carriagePct} unit="%" min={-50} max={100} onChange={setCarriagePct} />
+              <LabeledSlider label="Base swing" value={baseSwing} unit=" deg" min={-90} max={90} onChange={setBaseSwing} />
+              <LabeledSlider label="Shoulder" value={shoulder} unit=" deg" min={-90} max={90} onChange={setShoulder} />
+              <LabeledSlider label="Elbow" value={elbow} unit=" deg" min={-90} max={90} onChange={setElbow} />
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.1em", color: C.faint2, marginBottom: 6 }}>03 / SCENE LAYERS</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {LAYER_KEYS.map(([key, label]) => (
+                <label key={key} style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: MONO, fontSize: 10, color: C.muted2, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={layers[key]}
+                    onChange={(e) => setLayers((s) => ({ ...s, [key]: e.target.checked }))}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.1em", color: C.faint2, marginBottom: 6 }}>CAMERA</div>
+            <ToggleRow options={CAMERA_OPTIONS} value={cameraView} onChange={setCameraView} />
+          </div>
+        </div>
+
+        <div style={{ flex: "2 1 360px", minWidth: 280 }}>
+          <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.1em", color: C.faint }}>
+            {facility ? `${resolveFacilityDisplayName(facility.facility_name, facility.epa_frs_name, accountName ?? "Unknown account", facility.city)} · ` : "ACTIVE CONCEPT · "}
+            {mount === "top" ? "TOP-MOUNTED" : mount === "side" ? "SIDE-HUNG" : "BOOTH-WALL"} · {robots === 2 ? "DUAL RTU" : "SINGLE RTU"}
+          </div>
+          <div style={{ position: "relative", height: 420, marginTop: 8, border: `1px solid ${C.border}`, overflow: "hidden" }}>
+            <CellConfigurator3D config={config} />
+          </div>
+          <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint2, marginTop: 6 }}>
+            Drag to orbit · scroll to zoom · right-drag to pan
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 20px", marginTop: 18 }}>
+        {specs.map(([label, value]) => (
+          <div key={label}>
+            <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.1em", color: C.faint2 }}>{label}</div>
+            <div style={{ fontFamily: MONO, fontSize: 13, color: C.text2, marginTop: 2 }}>{value}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 16 }}>
+        {tradeoffs.map(([label, pct, note]) => (
+          <div key={label}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontFamily: MONO, fontSize: 10.5, color: C.muted2 }}>
+              <span>{label}</span>
+              <span style={{ color: C.faint }}>{note}</span>
+            </div>
+            <div style={{ height: 3, background: "#1F262B", marginTop: 5 }}>
+              <div style={{ height: 3, background: C.accent, width: `${pct}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint2, marginTop: 14 }}>
+        SOURCE: published equipment reference specs (FANUC / Preston Eastin), not EPA, OSHA, or USASpending.{" "}
+        {facility
+          ? "The geometry above is not tied to this facility; the cell count in the REAL DATA line above is."
+          : "Not tied to any facility in this dataset."}
       </div>
     </div>
   );

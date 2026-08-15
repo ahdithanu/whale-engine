@@ -18,6 +18,17 @@ export function nSignalsPresent(f: Facility): number {
   return keys.filter((k) => f.signals[k].present).length;
 }
 
+// A facility only ever counts toward TCV if the resolver's own qualification
+// gate (VOC/permit/employee-count) already passed AND the live-adjustable
+// composite score clears the live threshold -- moving weights can only ever
+// REMOVE facilities from the qualified set the backend produced, never
+// invent new TCV the backend never computed a basis for. Shared by
+// rollupAccounts (per-account) and any per-region/per-facility breakdown
+// that needs the exact same live-weighted qualification call.
+export function facilityQualifies(f: Facility, weights: Weights, qualifyThreshold: number): boolean {
+  return f.qualified_for_tcv && scoreFacility(f, weights) >= qualifyThreshold;
+}
+
 export type AccountRollup = {
   account: Account;
   facilities: Facility[];
@@ -51,16 +62,7 @@ export function rollupAccounts(
     let installedTcv = 0;
     let pipelineTcv = 0;
     facs.forEach((f) => {
-      const score = scoreFacility(f, weights);
-      const clearsThreshold = score >= qualifyThreshold;
-      // A facility only ever counts toward TCV if the resolver's own
-      // qualification gate (VOC/permit/employee-count) already passed AND
-      // the live-adjustable composite score clears the live threshold --
-      // moving weights can only ever REMOVE facilities from the qualified
-      // set the backend produced, never invent new TCV the backend never
-      // computed a basis for.
-      const qualifies = f.qualified_for_tcv && clearsThreshold;
-      if (qualifies) {
+      if (facilityQualifies(f, weights, qualifyThreshold)) {
         qualifiedCount++;
         if (f.installed_status === "untouched") {
           untouchedQualifiedCount++;

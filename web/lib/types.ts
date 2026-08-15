@@ -73,6 +73,9 @@ export type Account = {
   hq_city: string | null;
   hq_state: string | null;
   apollo_employee_count: number | null;
+  // Hand-curated "why call them this week" note (pipeline/overrides/news_notes.yaml)
+  // -- not a live news feed. Null for every account until a human adds one.
+  news_note: { text: string; url: string; date: string } | null;
 };
 
 // Government end users get a distinct badge and are excluded from the

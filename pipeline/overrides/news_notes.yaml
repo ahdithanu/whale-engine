@@ -1,0 +1,24 @@
+# Manual per-account news/signal notes -- the "why call them this week"
+# layer on top of the regional priority list (web/app/AppClient.tsx).
+#
+# There is no live news API integration. Building one means picking a
+# provider, provisioning an API key, and taking on an ongoing external cost
+# -- a real scope decision, not something to guess at (see CLAUDE.md: "ask
+# before inventing" applies to data sources same as endpoints). Until that
+# decision is made, this is a hand-curated file: same shape as
+# corporate_map.yaml and crm_status.csv, edited by a human, exported by
+# `make export`, no code change required to add an entry.
+#
+# Every note needs a real url so it's checkable, same as every other number
+# in this app -- never write a note without a source you can point to.
+#
+# account_id must match the resolver's account_id (visible in the account
+# detail view's ACCOUNT_ID row, or accounts.json). Format:
+#
+# notes:
+#   ACCOUNT_ID_HERE:
+#     text: "Short human-written note about what's happening and why it matters"
+#     url: "https://source-link"
+#     date: "2026-08-15"   # when the note was added, not necessarily the event date
+
+notes: {}

@@ -22,6 +22,7 @@ import json
 from datetime import datetime, timezone
 
 import duckdb
+import yaml
 
 from pipeline.config import DATA_DIR, DUCKDB_PATH, REPO_ROOT
 from pipeline.universe import load_universe
@@ -36,6 +37,10 @@ ENRICHMENT_CACHE_PATH = DATA_DIR / "enrichment" / "accounts.json"
 # facility_id,crm_status ("installed" | "in_pipeline" | "untouched") here --
 # no code change required.
 CRM_STATUS_OVERRIDE_PATH = REPO_ROOT / "pipeline" / "overrides" / "crm_status.csv"
+# Hand-curated "why call them this week" notes, one per account -- not a live
+# news feed (see news_notes.yaml for why). Empty file by default, so every
+# account exports news_note=null until a human adds one.
+NEWS_NOTES_PATH = REPO_ROOT / "pipeline" / "overrides" / "news_notes.yaml"
 
 SIZE_EMPLOYEE_SUBWEIGHT = 0.6  # matches employee_count_band(0.15) : air_permit_class(0.10) = 60:40
 SIZE_PERMIT_SUBWEIGHT = 0.4
@@ -92,9 +97,21 @@ def _load_crm_status_overrides() -> dict[str, str]:
         return {row["facility_id"]: row["crm_status"] for row in csv.DictReader(f)}
 
 
+def _load_news_notes() -> dict[str, dict]:
+    """account_id -> {text, url, date}, from the optional hand-curated
+    news_notes.yaml. Empty dict, not an error, if the file is missing or has
+    no entries yet -- see NEWS_NOTES_PATH above for why this isn't a live
+    feed."""
+    if not NEWS_NOTES_PATH.exists():
+        return {}
+    data = yaml.safe_load(NEWS_NOTES_PATH.read_text())
+    return (data or {}).get("notes") or {}
+
+
 def export_accounts(con: duckdb.DuckDBPyConnection, vertical_names: dict[str, str]) -> list[dict]:
     dominant = _dominant_vertical(con)
     enrichment = _load_enrichment_cache()
+    news_notes = _load_news_notes()
     rows = con.execute("""
         SELECT account_id, legal_name, vertical, account_is_customer,
                total_facilities, qualified_facilities, untouched_qualified_facilities,
@@ -137,6 +154,10 @@ def export_accounts(con: duckdb.DuckDBPyConnection, vertical_names: dict[str, st
             "hq_city": enr["hq_city"] if enr and enr["matched"] else None,
             "hq_state": enr["hq_state"] if enr and enr["matched"] else None,
             "apollo_employee_count": enr["apollo_employee_count"] if enr and enr["matched"] else None,
+            # Hand-curated "why call them this week" note -- see
+            # NEWS_NOTES_PATH above. Null for every account until a human
+            # adds one; never generated or inferred.
+            "news_note": news_notes.get(r["account_id"]),
         })
     return out
 
