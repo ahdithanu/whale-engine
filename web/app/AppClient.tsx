@@ -1183,7 +1183,7 @@ function CellReferencePanel({ facility, accountName }: { facility?: Facility; ac
   return (
     <div style={{ padding: 14, background: C.panel2, border: `1px solid ${C.border}` }}>
       <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: "0.1em", color: C.faint }}>
-        ILLUSTRATIVE GEOMETRY — REFERENCE EQUIPMENT CLASS, NOT A MEASUREMENT OF ANY FACILITY'S ACTUAL FLOOR PLAN
+        ILLUSTRATIVE GEOMETRY — REFERENCE EQUIPMENT CLASS, NOT A MEASUREMENT OF ANY FACILITY&apos;S ACTUAL FLOOR PLAN
       </div>
       <div style={{ fontSize: 12.5, lineHeight: 1.5, color: C.muted, marginTop: 8 }}>
         {facility
