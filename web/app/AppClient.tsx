@@ -588,6 +588,8 @@ function AccountDetailView({
         )}
       </div>
 
+      <ExpansionPathPanel rollup={rollup} weights={weights} threshold={threshold} onOpenFacility={onOpenFacility} />
+
       <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "18px 0 10px", flexWrap: "wrap" }}>
         <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.12em", color: C.faint, marginRight: 6 }}>FILTER</div>
         {([["ALL", "all"], ["UNTOUCHED ONLY", "untouched"], ["INSTALLED ONLY", "installed"]] as [string, typeof statusFilter][]).map(([label, val]) => {
@@ -637,6 +639,71 @@ function AccountDetailView({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// Agent 5 (Expansion Engine) -- "how does one cell become thirty". Real, not
+// mocked: it's a pure derivation over Agent 1's own facility_score, scoped to
+// this account's untouched + qualified facilities and ordered into a
+// suggested rollout sequence. No new data source, so nothing here is
+// invented -- but it's also honestly bounded: there's no real installed-cell
+// outcome data anywhere in this dataset (installed_status is "untouched" for
+// every facility today, see CLAUDE.md), so the sequence can't yet be
+// informed by which past installs actually worked. That limitation is
+// stated in the panel itself rather than left for a reader to discover.
+function ExpansionPathPanel({
+  rollup,
+  weights,
+  threshold,
+  onOpenFacility,
+}: {
+  rollup: AccountRollup;
+  weights: Weights;
+  threshold: number;
+  onOpenFacility: (id: string) => void;
+}) {
+  const path = rollup.facilities
+    .map((f) => ({ f, score: scoreFacility(f, weights) }))
+    .filter(({ f }) => f.installed_status === "untouched" && facilityQualifies(f, weights, threshold))
+    .sort((a, b) => b.score - a.score);
+
+  if (path.length === 0) return null;
+
+  const cumulativeTcv = path.reduce((s, { f }) => s + f.est_facility_tcv, 0);
+
+  return (
+    <div style={{ marginTop: 14, background: C.panel, border: `1px solid ${C.border}` }}>
+      <div style={{ padding: "14px 16px 10px" }}>
+        <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: "0.14em", color: C.accent }}>EXPANSION PATH · AGENT 5</div>
+        <div style={{ fontSize: 12.5, color: C.muted, marginTop: 4 }}>
+          {path.length} more qualified, untouched plant{path.length === 1 ? "" : "s"} at this account — {money(cumulativeTcv)} if the full sequence lands, ranked by the same signal score Agent 1 computes for every facility.
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {path.map(({ f, score }, i) => (
+          <div
+            key={f.facility_id}
+            onClick={() => onOpenFacility(f.facility_id)}
+            style={{ display: "flex", gap: 14, alignItems: "flex-start", padding: "12px 16px", borderTop: `1px solid ${C.rowBorder}`, cursor: "pointer" }}
+          >
+            <div style={{ fontFamily: MONO, fontSize: 16, color: i === 0 ? C.accent : C.faint, minWidth: 22 }}>{i + 1}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 13.5, color: C.text2 }}>{resolveFacilityDisplayName(f.facility_name, f.epa_frs_name, rollup.account.legal_name, f.city)}</div>
+                <div style={{ display: "flex", gap: 14, fontFamily: MONO, fontSize: 12, whiteSpace: "nowrap" }}>
+                  <span style={{ color: C.muted3 }}>SIGNAL {score}</span>
+                  <span style={{ color: C.accent }}>{money(f.est_facility_tcv)}</span>
+                </div>
+              </div>
+              <div style={{ fontSize: 11.5, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>{f.why_now}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint2, padding: "10px 16px 14px", borderTop: `1px solid ${C.border}` }}>
+        Not yet informed by real installed-cell outcomes — no facility in this dataset has ever been marked installed, so the sequence is signal-ranked, not outcome-calibrated.
+      </div>
     </div>
   );
 }
@@ -1069,26 +1136,26 @@ function ReviewQueueView({ reviews }: { reviews: PendingReview[] | null }) {
 
 function BriefView() {
   return (
-    <div style={{ padding: "14px 16px 28px", maxWidth: 780 }}>
+    <div style={{ padding: "14px 16px 28px" }}>
       <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: "0.14em", color: C.faint, marginBottom: 12 }}>BRIEF</div>
-      <div style={{ fontSize: 14, lineHeight: 1.6, color: C.text }}>
+      <div style={{ fontSize: 14, lineHeight: 1.6, color: C.text, maxWidth: 780 }}>
         Whale Engine ranks individual manufacturing plants by how much robotic surface finishing work is likely sitting inside them, then rolls those plants up to the parent company that owns them.
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 20 }}>
-        <div style={{ fontSize: 13, lineHeight: 1.5, color: C.muted }}>
+        <div style={{ fontSize: 13, lineHeight: 1.5, color: C.muted, maxWidth: 780 }}>
           <span style={{ color: C.faint, fontFamily: MONO, fontSize: 11, letterSpacing: "0.08em" }}>SOURCES&nbsp;&nbsp;</span>
           EPA Facility Registry Service and National Emissions Inventory · OSHA Injury Tracking Application · USASpending federal contract awards.
         </div>
-        <div style={{ fontSize: 13, lineHeight: 1.5, color: C.muted }}>
+        <div style={{ fontSize: 13, lineHeight: 1.5, color: C.muted, maxWidth: 780 }}>
           <span style={{ color: C.faint, fontFamily: MONO, fontSize: 11, letterSpacing: "0.08em" }}>UNTOUCHED QUALIFIED TCV&nbsp;&nbsp;</span>
           Contract value in plants that clear the signal threshold and have no cell installed and no open pipeline — most of it inside logos we have already landed.
         </div>
-        <div style={{ fontSize: 13, lineHeight: 1.5, color: C.muted }}>
+        <div style={{ fontSize: 13, lineHeight: 1.5, color: C.muted, maxWidth: 780 }}>
           <span style={{ color: C.faint, fontFamily: MONO, fontSize: 11, letterSpacing: "0.08em" }}>STATUS&nbsp;&nbsp;</span>
-          The Facility Signal Engine (Agent 1, which resolves and ranks plants — this app) is live on real data. Four additional agents in the planned system — Part Fit Qualifier, Multithread Map, Capital Case Builder, Expansion Engine — are architecture, not built.
+          The Facility Signal Engine (Agent 1, which resolves and ranks plants — this app) is live on real data. Expansion Engine (Agent 5) is also real — see the EXPANSION PATH panel on any account with more than one qualified plant — as a pure derivation over Agent 1's own signal scores, with no new data source. Three remaining agents — Part Fit Qualifier, Multithread Map, Capital Case Builder — are architecture, not built.
         </div>
         <CellReferencePanel />
-        <div style={{ fontSize: 13, lineHeight: 1.5, color: C.muted }}>
+        <div style={{ fontSize: 13, lineHeight: 1.5, color: C.muted, maxWidth: 780 }}>
           <span style={{ color: C.faint, fontFamily: MONO, fontSize: 11, letterSpacing: "0.08em" }}>PROVENANCE&nbsp;&nbsp;</span>
           Customer status is inferred from the public logo wall, not a CRM. Installed and pipeline flags require a CRM join and are currently unpopulated, so every qualified plant defaults to untouched.
         </div>

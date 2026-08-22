@@ -113,13 +113,16 @@ signal or is explicitly flagged as derived.
 | 2. Part Fit Qualifier | Will the robot work here | Architecture only. No part-level data source is wired up. |
 | 3. Multithread Map | Who else needs to be in the deal | Architecture only. No person/contact data source is wired up. |
 | 4. Capital Case Builder | How does this clear a committee | Architecture only. Designed to extend the customer's own public ROI calculator, not replace it — not implemented. |
-| 5. Expansion Engine | How does one cell become thirty | Architecture only. |
+| 5. Expansion Engine | How does one cell become thirty | **Real.** A pure derivation over Agent 1's own facility_score — no new data source. Ranks an account's untouched, qualified plants into a suggested rollout sequence, shown as the EXPANSION PATH panel on any account with more than one such plant. Not yet informed by real installed-cell outcome data, since no facility in this dataset has ever been marked installed. |
 
-Agent 1 is the entire build described above: ingestion, resolution, scoring,
-and the dashboard. Agents 2 through 5 exist as a defined object model and a
-stated design intent, not as working code. This is stated explicitly here so
-it is not discovered later — see CLAUDE.md for the full object model and
-scoring-model detail.
+Agent 1 is the full ingestion/resolution/scoring pipeline and the dashboard.
+Agent 5 is a real, working derivation on top of Agent 1's own output — no
+new data source, so it shipped without waiting on one. Agents 2 through 4
+exist as a defined object model and a stated design intent, not as working
+code: they need a data source Agent 1 doesn't have (part specs, org
+contacts, or user-entered financial inputs) that hasn't been wired up yet.
+This is stated explicitly here so it is not discovered later — see
+CLAUDE.md for the full object model and scoring-model detail.
 
 ## The five-stage system and the $20M account
 

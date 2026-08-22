@@ -406,10 +406,11 @@ more.
 | 2. Part Fit Qualifier | Will the robot work here | Mocked |
 | 3. Multithread Map | Who else needs to be in the deal | Mocked |
 | 4. Capital Case Builder | How does this clear a committee | Mocked |
-| 5. Expansion Engine | How does one cell become thirty | Mocked |
+| 5. Expansion Engine | How does one cell become thirty | REAL — a pure derivation over Agent 1's own facility_score (see EXPANSION PATH panel in AccountDetailView, `web/app/AppClient.tsx`). No new data source, so it didn't need to stay mocked. Not informed by real installed-cell outcomes yet, since installed_status is "untouched" for every facility today. |
 
 Agents 1 and 2 make the first deal possible. Agents 3 and 4 make it big.
-Agent 5 is where the $20M lives.
+Agent 5 is where the $20M lives, and is real: given the current data, it's
+already sequencing the rollout, not just describing it.
 
 Be explicit in the README about what is real and what is architecture. Do not
 let the reader discover it.
